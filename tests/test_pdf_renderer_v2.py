@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_renderer_v2 import classify_lines, group_regions, parse_tsv
+from newlight.pdf_renderer_v2 import classify_lines, group_regions, parse_tsv
 
 FIXTURES = Path(__file__).parent / 'fixtures/renderer_v2'
 

@@ -2,8 +2,8 @@
 """One-pass historical OCR: body and footnotes, using Ollama vision.
 
 Examples:
-    python src/newlight/ocr.py --page 41 --overwrite
-    python src/newlight/ocr.py --start 35 --end 49
+    newlight-legacy-ocr --page 41 --overwrite
+    newlight-legacy-ocr --start 35 --end 49
 """
 
 import argparse

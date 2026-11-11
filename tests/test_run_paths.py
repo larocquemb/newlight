@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from run_paths import create_run_directory
+from newlight.run_paths import create_run_directory
 
 
 def test_daily_sequence_and_existing_evidence_preserved(tmp_path):

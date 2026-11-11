@@ -12,11 +12,14 @@ import json
 import math
 from pathlib import Path
 import re
-from run_paths import create_run_directory
+import shutil
+import subprocess
+import tempfile
+from .run_paths import create_run_directory
 import zipfile
 from xml.etree import ElementTree as ET
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 SUPERS = '⁰¹²³⁴⁵⁶⁷⁸⁹'
 REF_RE = re.compile(r'[⁰¹²³⁴⁵⁶⁷⁸⁹]+|\[\^(\d+)\]|\^(\d+)')
 
@@ -25,8 +28,147 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def publish_export(source, destination):
+    """Atomically refresh a stable filename; the original run remains retained."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as temporary:
+        staging = Path(temporary.name)
+    try:
+        shutil.copyfile(source, staging)
+        staging.replace(destination)
+    finally:
+        staging.unlink(missing_ok=True)
+
+
+def normalize_docx(source, soffice):
+    """Round-trip through LibreOffice for Word interoperability; retain raw input."""
+    destination = source.parent / 'normalized'
+    destination.mkdir(exist_ok=True)
+    profile = source.parent / 'lo-profile'
+    result = subprocess.run([str(soffice), '-env:UserInstallation=' + profile.resolve().as_uri(),
+                             '--headless', '--norestore', '--convert-to', 'docx',
+                             '--outdir', str(destination.resolve()), str(source.resolve())],
+                            capture_output=True, text=True, timeout=180)
+    (source.parent / 'normalization.log').write_text(result.stdout + result.stderr, encoding='utf-8')
+    normalized = destination / source.name
+    if result.returncode or not normalized.is_file():
+        raise ValueError('Word compatibility normalization failed; see normalization.log')
+    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+    def contents(path):
+        with zipfile.ZipFile(path) as archive:
+            roots = [ET.fromstring(archive.read(name)) for name in ('word/document.xml', 'word/footnotes.xml')]
+        def text(root):
+            return ''.join(item.text or '' if item.tag=='{'+ns['w']+'}t' else '\xad'
+                           for item in root.iter() if item.tag in
+                           ('{'+ns['w']+'}t','{'+ns['w']+'}softHyphen'))
+        notes=[]
+        for note in roots[1]:
+            if note.get('{'+ns['w']+'}type'):continue
+            first=note.find('w:p/w:r',ns)
+            if first is not None:
+                style=first.find('w:rPr/w:rStyle',ns)
+                # LibreOffice writes the generated custom mark as a styled
+                # text run. Exclude only that leading mark, never note prose.
+                if style is not None and style.get('{'+ns['w']+'}val')=='FootnoteCharacters':
+                    note.find('w:p',ns).remove(first)
+            notes.append(' '.join(text(note).split()))
+        return (' '.join(text(roots[0]).split()),notes,
+                len(roots[0].findall('.//w:footnoteReference', ns)))
+    if contents(source) != contents(normalized):
+        raise ValueError('Normalization changed body/note text or native footnote reference count')
+    raw = source.parent / 'raw'
+    raw.mkdir()
+    shutil.copyfile(source, raw / source.name)
+    shutil.copyfile(normalized, source)
+    return {'status': 'passed', 'method': 'LibreOffice DOCX round-trip',
+            'raw_sha256': digest(raw / source.name), 'normalized_sha256': digest(source)}
+
+
 def normal(text):
     return ' '.join(text.casefold().split())
+
+
+def export_plain_text(ocr_dir, output_dir, start, end, available_only=False):
+    """Export saved OCR verbatim, without layout dependencies or inferred links."""
+    pages, missing = [], []
+    for number in range(start, end + 1):
+        path = ocr_dir / f'page_{number:04d}.json'
+        if not path.is_file():
+            missing.append(number)
+            continue
+        source = path.read_bytes()
+        page = json.loads(source)
+        if page.get('pdf_page') != number or not isinstance(page.get('body'), str):
+            raise ValueError(f'Invalid OCR identity/body: {path}')
+        notes = page.get('footnotes')
+        headers = page.get('running_headers', [])
+        if (not isinstance(notes, list)
+                or any(not isinstance(n, dict) or not isinstance(n.get('text'), str) for n in notes)
+                or not isinstance(headers, list) or any(not isinstance(h, str) for h in headers)):
+            raise ValueError(f'Invalid OCR footnotes/headers: {path}')
+        pages.append((page, path, hashlib.sha256(source).hexdigest()))
+    if missing and not available_only:
+        raise ValueError('Missing OCR pages: ' + ', '.join(map(str, missing)))
+    if not pages:
+        raise ValueError('No OCR pages available in selected range')
+
+    chunks, offset, evidence = [], 0, []
+
+    def append(text):
+        nonlocal offset
+        begin = offset
+        chunks.append(text)
+        offset += len(text)
+        return [begin, offset]
+
+    append('New Light on the Early History of the Greater Northwest — Volume I\n'
+           'Combined OCR transcription — unverified.\n'
+           'Original line breaks, spelling and page-local footnote segments are retained.\n'
+           'Tables retain OCR text; plain text does not reproduce fonts or native footnotes.\n')
+    if missing:
+        append('INCOMPLETE: missing PDF pages ' + ', '.join(map(str, missing)) + '\n')
+    for page, path, checksum in pages:
+        number = page['pdf_page']
+        printed = page.get('printed_page_number')
+        append(f'\n\n=== PDF page {number} | printed page {printed if printed is not None else "unknown"} ===\n')
+        item = {'pdf_page': number, 'source': str(path.resolve()), 'source_sha256': checksum,
+                'run_id': page.get('run_id'), 'body': None, 'footnotes': [], 'running_headers': []}
+        if page.get('running_headers'):
+            append('\n[Running headers]\n')
+            for header in page['running_headers']:
+                item['running_headers'].append(append(header))
+                append('\n')
+        append('\n[Body]\n')
+        item['body'] = append(page['body'])
+        append('\n')
+        for index, note in enumerate(page['footnotes']):
+            label = 'unnumbered' if note.get('marker') is None else str(note['marker'])
+            append(f'\n[Footnote {label}; source segment {index + 1}]\n')
+            span = append(note['text'])
+            append('\n')
+            item['footnotes'].append({'text': span, 'marker': note.get('marker'),
+                                     'continues_from_previous_page': note.get('continues_from_previous_page'),
+                                     'continues_on_next_page': note.get('continues_on_next_page')})
+        evidence.append(item)
+    text = ''.join(chunks)
+    # Compare all content spans before writing; offsets are Unicode characters.
+    for (page, _, _), item in zip(pages, evidence):
+        assert text[slice(*item['body'])] == page['body']
+        for note, saved in zip(page['footnotes'], item['footnotes']):
+            assert text[slice(*saved['text'])] == note['text']
+    run = create_run_directory(output_dir)
+    output = run / f'newlight-pages-{start}-{end}-{run.name}.txt'
+    output.write_bytes(text.encode('utf-8'))
+    audit = {'created_at': datetime.now(timezone.utc).isoformat(), 'source_range': [start, end],
+             'source_pages': len(pages), 'missing_pages': missing, 'complete': not missing,
+             'source_ocr_status': 'unverified; text copied without corrections or inferred note links',
+             'footnote_segments': sum(len(p['footnotes']) for p, _, _ in pages),
+             'body_characters': sum(len(p['body']) for p, _, _ in pages),
+             'output': str(output.resolve()), 'text_sha256': digest(output),
+             'code_sha256': digest(Path(__file__)), 'offset_unit': 'Unicode characters',
+             'pages': evidence}
+    (run / 'text-audit.json').write_text(json.dumps(audit, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return output
 
 
 def marker_number(value):
@@ -99,13 +241,20 @@ def split_blocks(text, layout, italics):
         line=pending[index]
         matched=None
         for table in tables:
+            if not table['lines']:continue
             prefix=' '.join(table['lines'][0]['text'].split()[:3])
             if normal(line).startswith(normal(prefix)):
                 matched=table;break
         if matched:
             flush();rows=[]
             while index<len(pending) and len(rows)<len(matched['lines']):
-                if pending[index].strip():rows.append(table_row(pending[index]))
+                if pending[index].strip():
+                    try:row=table_row(pending[index])
+                    except ValueError:
+                        # Preserve headers and ambiguous OCR quantities verbatim.
+                        row={'cells':[pending[index],'',''],'source_text':pending[index],
+                             'quantity_unresolved':True}
+                    rows.append(row)
                 index+=1
             if len(rows)!=len(matched['lines']):raise ValueError('Incomplete table rows')
             blocks.append({'kind':'table','rows':rows,'bbox_px':matched['bbox_px']})
@@ -155,6 +304,13 @@ def enrich(ocr_dir, renderer_run, start, end, annotations=None, available_only=F
         raw=json.loads(source.read_text());layout=json.loads(layout_path.read_text())
         if raw['pdf_page']!=number or layout['pdf_page']!=number:raise ValueError('Page identity mismatch')
         if raw.get('source_sha256')!=layout['image_sha256']:raise ValueError(f'Page {number}: image provenance mismatch')
+        if raw.get('source_review'):
+            reviewed=ocr_dir/'runs'/raw['run_id']/f'page_{number:04d}.layout.json'
+            if not reviewed.is_file():raise ValueError(f'Page {number}: reviewed layout snapshot missing')
+            effective=json.loads(reviewed.read_text())
+            if effective['pdf_page']!=number or effective['image_sha256']!=layout['image_sha256']:
+                raise ValueError(f'Page {number}: reviewed layout provenance mismatch')
+            layout_path=reviewed;layout=effective
         data=json.loads(json.dumps(raw));config=annotations.get('pages',{}).get(str(number),{})
         if available_only and str(data['printed_page_number'])!=str(number-34):
             issues.append({'pdf_page':number,'kind':'printed_page_number_normalized',
@@ -468,7 +624,7 @@ def build_docx(model, output):
                     ref.set(qn('w:customMarkFollows'),'1');custom_mark(paragraph,run,marker)
                 cursor=match.end()
             if cursor<len(styled['text']):set_font(paragraph.add_run(styled['text'][cursor:]),size,styled['italic'])
-    if model.get('available_only'):
+    if model.get('available_only') and model.get('missing_pages'):
         cover=document.sections[0]
         cover.page_width=Pt(612);cover.page_height=Pt(792)
         cover.top_margin=cover.bottom_margin=cover.left_margin=cover.right_margin=Pt(72)
@@ -686,11 +842,35 @@ def audit_docx(path, model):
         tables=body.findall('.//w:tbl',ns)
         expected_tables=[b for p in model['pages'] for b in p['blocks'] if b['kind']=='table']
         if len(tables)!=len(expected_tables):raise ValueError('Missing native table')
+        native_by_id={n['id']:n for n in native_notes}
+        def cell_text(cell):
+            parts=[]
+            for paragraph in cell.findall('.//w:p',ns):
+                pending=None
+                for run in paragraph.findall('w:r',ns):
+                    text=''.join((item.text or '') if item.tag=='{'+ns['w']+'}t' else
+                                 '\t' if item.tag=='{'+ns['w']+'}tab' else '\n'
+                                 for item in run if item.tag in
+                                 ('{'+ns['w']+'}t','{'+ns['w']+'}tab','{'+ns['w']+'}br'))
+                    if pending is not None:
+                        if text!=pending:raise ValueError('Custom footnote mark differs from source')
+                        pending=None
+                        continue
+                    ref=run.find('w:footnoteReference',ns)
+                    if ref is not None and ref.get('{'+ns['w']+'}customMarkFollows')=='1':
+                        note=native_by_id[int(ref.get(attr))]
+                        mark='\u200b' if note.get('continuation') or note.get('marker') is None else str(note['marker'])
+                        if text:
+                            if text!=mark:raise ValueError('Custom footnote mark differs from source')
+                        else:pending=mark
+                    else:parts.append(text)
+                if pending is not None:raise ValueError('Custom footnote mark missing')
+            return ''.join(parts)
         for native,expected in zip(tables,expected_tables):
             rows=native.findall('w:tr',ns)
             if len(rows)!=len(expected['rows']):raise ValueError('Missing native table row')
             for row,source in zip(rows,expected['rows']):
-                cells=[''.join(t.text or '' for t in c.findall('.//w:t',ns)) for c in row.findall('w:tc',ns)]
+                cells=[cell_text(c) for c in row.findall('w:tc',ns)]
                 if cells!=source['cells']:raise ValueError('Table cell content differs')
                 for column,cell in enumerate(row.findall('w:tc',ns)):
                     top=cell.find('w:tcPr/w:tcBorders/w:top',ns)
@@ -733,10 +913,20 @@ def audit_footnote_pagination(model, rendered_page_texts):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ocr-dir',type=Path,required=True)
-    parser.add_argument('--renderer-run',type=Path,required=True)
+    parser.add_argument('--renderer-run',type=Path)
     parser.add_argument('--start',type=int,default=35);parser.add_argument('--end',type=int,default=480)
     parser.add_argument('--annotations',type=Path)
-    parser.add_argument('--output',type=Path,default=ROOT/'data/processed/word')
+    parser.add_argument('--output',type=Path,
+                        help='Output directory (default: data/processed/text for --text-only, otherwise data/processed/word)')
+    modes=parser.add_mutually_exclusive_group()
+    modes.add_argument('--text-only',action='store_true',
+                        help='Combine saved OCR into UTF-8 text and a provenance audit; no renderer or Word dependencies needed')
+    modes.add_argument('--both',action='store_true',
+                       help='Export TXT and Word together, with stable newlight.txt/newlight.docx under data/processed/book')
+    parser.add_argument('--allow-review-issues',action='store_true',
+                        help='Require all selected pages, but retain unresolved note links and table layouts for review')
+    parser.add_argument('--normalize-with',type=Path,
+                        help='LibreOffice soffice executable for Word compatibility normalization')
     parser.add_argument('--text-width',type=float,default=325,
                         help='Maximum Word text-column width in points; original scan geometry is retained (default: 325)')
     parser.add_argument('--enrich-only',action='store_true')
@@ -746,11 +936,26 @@ def main(argv=None):
                         help='Anchor continuation segments to source pages (default), or let whole native notes flow')
     args=parser.parse_args(argv)
     if args.start>args.end:parser.error('Require start <= end')
+    if args.both and args.enrich_only:parser.error('--both cannot be combined with --enrich-only')
+    if args.text_only:
+        if args.annotations or args.enrich_only:
+            parser.error('--text-only cannot be combined with --annotations or --enrich-only; exports preserve raw OCR')
+        output=export_plain_text(args.ocr_dir,args.output or ROOT/'data/processed/text',
+                                 args.start,args.end,args.available_only)
+        publish_export(output,output.parent.parent.parent/'newlight.txt')
+        print(output,flush=True)
+        return
+    if args.renderer_run is None:parser.error('--renderer-run is required unless --text-only is used')
+    if args.output is None:args.output=ROOT/'data/processed'/('book' if args.both else 'word')
+    if args.allow_review_issues and not args.available_only:
+        missing=[n for n in range(args.start,args.end+1) if not (args.ocr_dir/f'page_{n:04d}.json').is_file()]
+        if missing:parser.error('Missing OCR pages: '+', '.join(map(str,missing)))
     if not math.isfinite(args.text_width) or args.text_width<=0:parser.error('--text-width must be finite and positive')
     annotations=json.loads(args.annotations.read_text()) if args.annotations else {}
-    model=enrich(args.ocr_dir,args.renderer_run,args.start,args.end,annotations,args.available_only)
+    model=enrich(args.ocr_dir,args.renderer_run,args.start,args.end,annotations,
+                 args.available_only or args.allow_review_issues)
     if not model['pages']:parser.error('No OCR pages available in selected range')
-    if args.available_only:model['body_size_pt']=12.0
+    if model['available_only']:model['body_size_pt']=12.0
     model['text_width_pt']=args.text_width
     model['footnote_pagination']=args.footnote_pagination
     if args.footnote_pagination=='source':
@@ -771,7 +976,15 @@ def main(argv=None):
     if not args.enrich_only:
         output=run/f'newlight-pages-{args.start}-{args.end}-{run.name}.docx';build_docx(model,output)
         audit['structure']=audit_docx(output,model)
+        if args.normalize_with:audit['normalization']=normalize_docx(output,args.normalize_with)
         audit['docx_sha256']=digest(output);print(output,flush=True)
+        publish_export(output,args.output/'newlight.docx')
+    if args.both:
+        text_output=export_plain_text(args.ocr_dir,args.output,args.start,args.end,args.available_only)
+        publish_export(text_output,args.output/'newlight.txt')
+        audit['text_output']=str(text_output.resolve())
+        audit['text_sha256']=digest(text_output)
+        print(args.output/'newlight.txt',flush=True)
     (run/'audit.json').write_text(json.dumps(audit,ensure_ascii=False,indent=2)+'\n')
     print('Enriched model:',run/'book.enriched.json',flush=True)
 

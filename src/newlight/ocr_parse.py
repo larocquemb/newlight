@@ -13,12 +13,12 @@ import statistics
 import subprocess
 from pathlib import Path
 import time
-from run_paths import create_run_directory
+from .run_paths import create_run_directory
 
 from ollama import Client
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 MODEL = "mistral-small3.2:24b"
 PROMPT = """Transcribe the TARGET scanned page of New Light on the Early History
 of the Greater Northwest. The supplied images are consecutive PDF pages in the
@@ -347,12 +347,12 @@ def main(argv=None):
             parser.error("--region-lines must be positive")
         if args.layout_hints:
             parser.error("--layout-hints cannot be combined with --renderer-run")
-        from ocr_regions import run_region_ocr
+        from .ocr_regions import run_region_ocr
         return run_region_ocr(args)
     paths = {n: args.images / f"page_{n:04d}.png" for n in range(args.start, args.end + 1)}
     missing = [str(p) for p in paths.values() if not p.is_file()]
     if missing:
-        parser.error("Missing input images; run python pdf_renderer.py first:\n" + "\n".join(missing))
+        parser.error("Missing input images; run newlight-render first:\n" + "\n".join(missing))
     client = Client(host=args.host, timeout=args.timeout)
     try:
         model_info = client.show(args.model).model_dump(mode="json")

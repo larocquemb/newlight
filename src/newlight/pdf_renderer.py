@@ -8,7 +8,7 @@ from pathlib import Path
 import pymupdf
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_INPUT = (
     PROJECT_ROOT / "data/external/newlightonearlyh01henr.pdf"

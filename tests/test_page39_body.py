@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ocr_parse import Page, validate_page
+from newlight.ocr_parse import Page, validate_page
 
 
 def check_page39(page):

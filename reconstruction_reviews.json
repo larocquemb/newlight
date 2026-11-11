@@ -1,0 +1,89 @@
+{
+  "review_basis": "Previously reviewed source-page typography from retained annotations and explicit user corrections; limited coverage, not full proofreading",
+  "pages": {
+    "38": {
+      "italics": [
+        "Feb. 19th, 1800.",
+        "7th.",
+        "13th.",
+        "16th.",
+        "20th.",
+        "24th.",
+        "27th.",
+        "April 11th.",
+        "Bison americanus",
+        "Cathartes aura",
+        "Phalacrocorax dilophus",
+        "Olor americanus",
+        "O. buccinator",
+        "Negundo aceroides",
+        "Ectopistes migratorius"
+      ],
+      "table_rules": [
+        {
+          "row_label": "Total cost",
+          "top_rule_columns": [
+            1,
+            2
+          ]
+        }
+      ],
+      "corrections": [
+        {
+          "before": "I gave out in debts in the fall, to the Saulteur Indians, 982",
+          "after": "I gave out in debts in the fall, to the Saulteur Indians, 982 \"",
+          "reason": "User-reviewed ditto mark repeats skins in this row"
+        },
+        {
+          "before": "Loss, . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 364",
+          "after": "Loss, . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 364 \"",
+          "reason": "User-reviewed ditto mark repeats skins in this row"
+        }
+      ]
+    },
+    "39": {
+      "italics": [
+        "coup d'essai"
+      ]
+    },
+    "40": {
+      "italics": [
+        "Saturday, July 19th, 1800, 3 p. m."
+      ]
+    },
+    "41": {
+      "italics": [
+        "Sunday, July 20th."
+      ],
+      "table_rules": [
+        {
+          "row_label": "Total",
+          "top_rule_columns": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    "42": {
+      "italics": [
+        "July 21st."
+      ],
+      "note_italics": [
+        "Ectopistes migratorius",
+        "la Prairie"
+      ]
+    },
+    "35": {
+      "corrections": [
+        {
+          "scope": "footnote",
+          "marker": "1",
+          "before": "are Pine, Squirrel, and Rat crs.\nOther geographical",
+          "after": "are Pine, Squirrel, and Rat crs.\n\nOther geographical",
+          "reason": "User-reviewed paragraph ending; do not stretch its final line"
+        }
+      ]
+    }
+  }
+}

@@ -7,8 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 
-import ocr_parse
-import ocr_regions as regions
+from newlight import ocr_parse
+from newlight import ocr_regions as regions
 
 
 def dump(path, data):

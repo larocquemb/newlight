@@ -15,11 +15,11 @@ import re
 import shutil
 import statistics
 import subprocess
-from run_paths import create_run_directory
+from .run_paths import create_run_directory
 
 import pymupdf
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = ROOT / "data/external/newlightonearlyh01henr.pdf"
 COLORS = {"body": (0, 120, 255), "table": (0, 170, 80),
           "footnote": (210, 60, 170), "running_header": (255, 140, 0),

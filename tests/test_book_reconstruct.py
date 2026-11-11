@@ -4,8 +4,112 @@ import zipfile
 
 import pytest
 
-from book_reconstruct import audit_docx, enrich, styled_runs, table_row, split_blocks, text_frame, mark_page_continuations
-from book_reconstruct import audit_footnote_pagination, source_page_footnotes, custom_properties_xml, justify_footnote_last_line
+from newlight.book_reconstruct import audit_docx, enrich, styled_runs, table_row, split_blocks, text_frame, mark_page_continuations
+from newlight.book_reconstruct import audit_footnote_pagination, source_page_footnotes, custom_properties_xml, justify_footnote_last_line
+from newlight.book_reconstruct import export_plain_text, main
+from newlight.book_reconstruct import publish_export
+
+
+@pytest.mark.parametrize('tamper',[False,True])
+def test_table_audit_preserves_tabs_and_excludes_only_generated_note_mark(tmp_path,tamper):
+    ns='http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    path=tmp_path/'table.docx'
+    cells=['147\t63','600','']
+    model={'pages':[{'printed_page_number':None,'blocks':[{'kind':'table','rows':[{'cells':cells}]}]}],
+           'footnotes':[{'id':1,'marker':'10','text':'Note.','references':[{}]}]}
+    with zipfile.ZipFile(path,'w') as archive:
+        archive.writestr('word/document.xml',f'''<w:document xmlns:w="{ns}"><w:body><w:tbl><w:tr>
+          <w:tc><w:p><w:r><w:footnoteReference w:id="1" w:customMarkFollows="1"/></w:r>
+          <w:r><w:t>10</w:t></w:r><w:r><w:t>147</w:t><w:tab/><w:t>63</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p><w:r><w:t>{'601' if tamper else '600'}</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p/></w:tc></w:tr></w:tbl></w:body></w:document>''')
+        archive.writestr('word/footnotes.xml',f'<w:footnotes xmlns:w="{ns}"><w:footnote w:id="1"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t>Note.</w:t></w:r></w:p></w:footnote></w:footnotes>')
+    if tamper:
+        with pytest.raises(ValueError,match='Table cell content differs'):audit_docx(path,model)
+    else:assert audit_docx(path,model)['native_tables']==1
+
+
+def test_stable_export_updates_without_changing_retained_run(tmp_path):
+    source=tmp_path/'dated.txt';source.write_text('First version')
+    stable=tmp_path/'book'/'newlight.txt'
+    publish_export(source,stable)
+    second=tmp_path/'second.txt';second.write_text('Second version')
+    publish_export(second,stable)
+    assert stable.read_text()=='Second version'
+    assert source.read_text()=='First version'
+
+
+def test_review_mode_still_requires_every_page(tmp_path):
+    with pytest.raises(SystemExit):
+        main(['--both','--allow-review-issues','--ocr-dir',str(tmp_path),
+              '--renderer-run',str(tmp_path),'--start','35','--end','36'])
+
+
+def test_reviewed_layout_snapshot_is_used_and_provenance_checked(tmp_path):
+    ocr,layout=page_pair(tmp_path)
+    source=ocr/'page_0040.json';page=json.loads(source.read_text())
+    page.update(source_review={'basis':'test review'},run_id='review-run')
+    source.write_text(json.dumps(page))
+    snapshot=ocr/'runs'/'review-run'/'page_0040.layout.json'
+    snapshot.parent.mkdir(parents=True)
+    effective=json.loads((layout/snapshot.name).read_text())
+    effective['regions'][0]['bbox_px'][0]=120
+    snapshot.write_text(json.dumps(effective))
+    model=enrich(ocr,layout,40,41)
+    assert model['pages'][0]['provenance']['layout_path']==str(snapshot.resolve())
+    assert model['pages'][0]['geometry']['left_pt']==pytest.approx(120*72/200)
+    effective['image_sha256']='wrong image';snapshot.write_text(json.dumps(effective))
+    with pytest.raises(ValueError,match='reviewed layout provenance mismatch'):
+        enrich(ocr,layout,40,41)
+
+
+def test_plain_text_preserves_every_body_and_note_segment(tmp_path):
+    import hashlib
+    source = tmp_path / 'ocr'
+    source.mkdir()
+    pages = []
+    for number, marker in [(35, '1'), (36, None)]:
+        page = {'pdf_page': number, 'body': '  François  [river].¹\nNorth-\nwest.\n',
+                'printed_page_number': str(number - 34), 'running_headers': ['JOURNAL.'],
+                'footnotes': [{'marker': marker, 'text': '  Note\ncontinued.  ',
+                               'continues_from_previous_page': marker is None}]}
+        (source / f'page_{number:04d}.json').write_text(json.dumps(page))
+        pages.append(page)
+    output = export_plain_text(source, tmp_path / 'out', 35, 36)
+    text = output.read_text(encoding='utf-8')
+    audit = json.loads((output.parent / 'text-audit.json').read_text())
+    assert audit['complete'] is True
+    assert audit['source_pages'] == 2
+    assert audit['footnote_segments'] == 2
+    assert audit['text_sha256'] == hashlib.sha256(output.read_bytes()).hexdigest()
+    for page, entry in zip(pages, audit['pages']):
+        assert text[slice(*entry['body'])] == page['body']
+        assert text[slice(*entry['footnotes'][0]['text'])] == page['footnotes'][0]['text']
+        assert text[slice(*entry['running_headers'][0])] == 'JOURNAL.'
+    assert '[Footnote unnumbered; source segment 1]' in text
+    assert text.index('PDF page 35') < text.index('PDF page 36')
+
+
+def test_plain_text_requires_complete_range_unless_explicit_draft(tmp_path):
+    page = {'pdf_page': 35, 'body': 'Text.', 'footnotes': []}
+    (tmp_path / 'page_0035.json').write_text(json.dumps(page))
+    with pytest.raises(ValueError, match='Missing OCR pages: 36'):
+        export_plain_text(tmp_path, tmp_path / 'out', 35, 36)
+    assert not (tmp_path / 'out').exists()
+    output = export_plain_text(tmp_path, tmp_path / 'out', 35, 36, available_only=True)
+    assert 'INCOMPLETE: missing PDF pages 36' in output.read_text()
+
+
+def test_plain_text_cli_needs_no_renderer_and_rejects_wrong_page_identity(tmp_path):
+    path = tmp_path / 'page_0035.json'
+    path.write_text(json.dumps({'pdf_page': 36, 'body': 'Wrong page.', 'footnotes': []}))
+    args = ['--text-only', '--ocr-dir', str(tmp_path), '--start', '35', '--end', '35',
+            '--output', str(tmp_path / 'out')]
+    with pytest.raises(ValueError, match='identity/body'):
+        main(args)
+    path.write_text(json.dumps({'pdf_page': 35, 'body': 'Correct page.', 'footnotes': []}))
+    main(args)
+    assert len(list((tmp_path / 'out').glob('runs/*/*.txt'))) == 1
 
 
 @pytest.mark.parametrize('text,continued,expected',[

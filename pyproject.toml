@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "newlight"
+version = "0.1.0"
+description = "Historical book rendering, OCR and Word reconstruction"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pymupdf>=1.24", "ollama>=0.6", "pydantic>=2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+word = ["python-docx>=1.1", "lxml>=5"]
+
+[project.scripts]
+newlight-render = "newlight.pdf_renderer:main"
+newlight-render-v2 = "newlight.pdf_renderer_v2:main"
+newlight-ocr = "newlight.ocr_parse:main"
+newlight-reconstruct = "newlight.book_reconstruct:main"
+newlight-legacy-ocr = "newlight.ocr:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

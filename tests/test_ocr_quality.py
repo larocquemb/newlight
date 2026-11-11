@@ -1,14 +1,12 @@
 """Offline tests for the current parser; no model calls or generated data needed."""
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ocr_parse as ocr
+from newlight import ocr_parse as ocr
 
 
 def page_data(number=35):

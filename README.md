@@ -1,19 +1,49 @@
 # newlight
 Convert: New Light on the Early History of the Greater Northwest Vol I to text
 
+## Installation and project layout
+
+Activate the existing virtual environment and install the project in editable mode:
+
+```sh
+source .venv/bin/activate
+python -m pip install -e ".[test,word]"
+```
+
+Reusable modules live in `src/newlight/`; command wrappers live in `scripts/`;
+regressions and fixtures remain in `tests/`. Generated artifacts stay under
+`data/processed/`. Run commands from the repository root when using relative
+input/output paths. Editable installation keeps default source/data paths tied
+to this checkout.
+
+| Command | Purpose |
+| --- | --- |
+| `newlight-render` | Original PDF renderer |
+| `newlight-render-v2` | Deterministic layout renderer |
+| `newlight-ocr` | Page and region OCR |
+| `newlight-reconstruct` | Word reconstruction and enriched JSON |
+| `newlight-legacy-ocr` | Legacy one-pass OCR |
+
+For example, `newlight-render-v2 --start 35 --end 44`. After installation,
+`python scripts/pdf_renderer_v2.py --start 35 --end 44` and
+`python -m newlight.pdf_renderer_v2 --start 35 --end 44` also work.
+The former root-level Python commands have moved; update local shell commands
+accordingly. Past run manifests and source snapshots retain their original paths.
+
 ## Renderer v2: deterministic layout proposals
 
-`pdf_renderer_v2.py` renders with PyMuPDF and measures word positions with local
+`src/newlight/pdf_renderer_v2.py` renders with PyMuPDF and measures word positions with local
 Tesseract. It uses relative letter height, inset margins, column spacing and
 neighboring lines to propose body, table, footnote, running-header and page-number
-regions. It makes no Ollama requests. The original `pdf_renderer.py` is retained.
+regions. It makes no Ollama requests. The original `src/newlight/pdf_renderer.py` is retained.
 
 Use the existing virtual environment and install the system `tesseract` command
 if needed (`brew install tesseract` on macOS):
 
 ```sh
 source .venv/bin/activate
-python pdf_renderer_v2.py --start 35 --end 44
+python -m pip install -e ".[test]"
+newlight-render-v2 --start 35 --end 44
 python -m pytest tests/test_pdf_renderer_v2.py -q
 ```
 
@@ -35,14 +65,14 @@ Review overlays before accepting regions. Tables and notes can share a font
 size; indentation and column structure help distinguish them. Marker recognition
 can be wrong, page continuation links are not inferred, and ambiguous sizes are
 flagged. The existing PDF OCR layer is not used as ground truth. This version
-prepares crops for the region mode in `ocr_parse.py`.
+prepares crops for the region mode in `src/newlight/ocr_parse.py`.
 
 ## Transcribe renderer v2 regions
 
 Pass the exact run directory printed by the renderer (not its parent directory):
 
 ```sh
-python ocr_parse.py --start 40 --end 42 \
+newlight-ocr --start 40 --end 42 \
   --renderer-run data/processed/rendered-v2/runs/YOUR_RUN_ID \
   --model ministral-3:14b --num-ctx 8192 --num-predict 4096 \
   --region-lines 1 \
@@ -181,7 +211,7 @@ are intentionally incompatible with ordinary v8 resume.
 To recover only absent pages while preserving the consolidated earlier outputs:
 
 ```sh
-python ocr_parse.py --start 35 --end 480 \
+newlight-ocr --start 35 --end 480 \
   --renderer-run data/processed/rendered-v2/runs/20261111T034716Z-9c5339b8 \
   --model ministral-3:14b --num-ctx 8192 --num-predict 4096 \
   --region-lines 1 --missing-only --output data/processed/parsed/full-book
@@ -200,7 +230,48 @@ chapter titles and coordinate-scale invariance without running OCR or a model.
 
 ## Editable Word reconstruction
 
-`book_reconstruct.py` combines OCR text with renderer-v2 geometry. It produces an
+Generate both formats together, with easy-to-find filenames:
+
+```sh
+newlight-reconstruct --both --allow-review-issues \
+  --ocr-dir data/processed/parsed/full-book --start 35 --end 480 \
+  --renderer-run data/processed/rendered-v2/runs/20261111T034716Z-9c5339b8 \
+  --annotations reconstruction_reviews.json
+```
+
+The current exports are `data/processed/book/newlight.txt` and
+`data/processed/book/newlight.docx`. Dated source exports and audits remain under
+`data/processed/book/runs/`; refreshing the stable filenames preserves those runs.
+`--output DIRECTORY` relocates both formats together. Word creation requires
+the `word` installation extra. `--allow-review-issues` still requires all selected
+pages, but preserves unresolved notes at editorial source-page anchors and records
+the remaining review issues. Complete exports begin with the book itself.
+`reconstruction_reviews.json` retains the limited previously reviewed typography
+and table-rule annotations. TXT preserves raw OCR; Word applies those audited
+annotations. For Word compatibility, pass `--normalize-with /path/to/soffice`
+to round-trip the DOCX through LibreOffice before publishing; the raw DOCX is
+retained and body/note text and reference counts are checked after normalization.
+
+To generate a combined plain-text book from all 446 saved OCR pages:
+
+```sh
+newlight-reconstruct --text-only \
+  --ocr-dir data/processed/parsed/full-book --start 35 --end 480
+```
+
+The command prints the UTF-8 `.txt` path under `data/processed/text/runs/`.
+It requires every selected page by default; `--available-only` creates an
+explicitly incomplete draft listing missing pages. No renderer or Word libraries
+are needed. Body, running-header and footnote text retain their saved spelling,
+spacing and line breaks. Page markers separate PDF pages and report saved printed
+page numbers (unknown labels are not guessed). Footnote continuations remain
+page-local segments, avoiding inferred links or renumbering. Tables retain their
+OCR text; typography and editable Word footnotes are not represented in text.
+`text-audit.json` retains input/output hashes and character offsets for every
+body, header and footnote segment. Source OCR stays unverified and unchanged;
+review annotations are not applied in text-only mode.
+
+`src/newlight/book_reconstruct.py` combines OCR text with renderer-v2 geometry. It produces an
 enriched JSON model, an audit, and an editable DOCX with heading styles, separate
 running headers, PAGE fields, inset native tables, and native Word footnotes.
 Headers use centered/right tab stops with page numbers at the outside margins.
@@ -238,7 +309,7 @@ They export as native cell borders and are checked by the structure audit.
 Preview the structured model without document dependencies:
 
 ```sh
-python book_reconstruct.py --start 38 --end 42 \
+newlight-reconstruct --start 38 --end 42 \
   --ocr-dir data/processed/word/pilot-inputs \
   --renderer-run data/processed/rendered-v2/runs/20261111T034716Z-9c5339b8 \
   --annotations data/processed/word/pilot-annotations.json --enrich-only

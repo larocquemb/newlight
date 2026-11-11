@@ -18,3 +18,8 @@ htmlcov/
 
 # Generated page images, layout runs, OCR output and scratch files
 /data/processed/
+
+# Python packaging
+*.egg-info/
+build/
+dist/

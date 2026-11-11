@@ -16,12 +16,12 @@ from difflib import SequenceMatcher
 import pymupdf
 from pathlib import Path
 import time
-from run_paths import create_run_directory
+from .run_paths import create_run_directory
 
 from ollama import Client
 from pydantic import BaseModel, ConfigDict, StrictStr
 
-from ocr_parse import Note, Page, save_page, sha256, validate_page, write_json, separate_running_headers
+from .ocr_parse import Note, Page, save_page, sha256, validate_page, write_json, separate_running_headers
 
 ROLES = {'body', 'table', 'footnote', 'running_header', 'page_number'}
 PIPELINE_VERSION = 8
