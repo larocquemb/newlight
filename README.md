@@ -115,6 +115,17 @@ using its visible word spans. Declared running headers duplicated at a body
 edge are separated with an exact removal audit; interior duplicates still fail.
 Conflicting transcribed footnote numbers require an independent enlarged glyph
 reading agreeing with one of those transcriptions, never the layout candidate.
+Pipeline v6 detects faded ink using grayscale contrast, expands word crops into
+neighboring whitespace, and counts currency symbols as visible tokens. It can
+reread a marked word with adjacent words as context. Before reconstructing a
+line from fragments, two agreeing complete-line readings may adjudicate
+nonnumeric OCR anchors, requiring at least every measured lexical token and no
+added opening bracket. Numeric disagreements still require word-level reads.
+Equivalent apostrophe typography compares equally; saved transcription is not
+normalized. Isolated footer marks below all text are retained as non-folio
+candidates when a separate folio aligns with the header. Repeated server aborts
+can fall back to smaller visual spans, with raw errors and derived assemblies
+distinguished in evidence. All retry paths remain bounded and reviewable.
 Pipeline revisions invalidate older cached outputs: choose a fresh output
 directory or explicitly use `--overwrite` after an extraction change.
 Successful outputs can be resumed with matching layout/model/settings; use a fresh output directory
@@ -125,7 +136,7 @@ context for a one-page retry; their hashes are recorded and files left untouched
 The older whole-page mode is available by omitting `--renderer-run`.
 
 The current `data/processed/parsed/full-book/` recovery dataset combines retained
-earlier pipeline outputs with v5 missing-page recovery. Its `recovery_manifest.json` records
+earlier pipeline outputs with v6 missing-page recovery. Its `recovery_manifest.json` records
 every source path/hash and all missing pages; it is incomplete and unverified.
 Historical runs remain unchanged. Check its generated-page regressions with:
 
@@ -134,8 +145,19 @@ NEWLIGHT_QA_OUTPUT=data/processed/parsed/full-book python -m pytest -q
 ```
 
 Passing these selected page checks does not validate every page of the book.
-For a fresh full v5 run, choose a new output directory; retained older checkpoints
-are intentionally incompatible with ordinary v5 resume.
+With `NEWLIGHT_QA_OUTPUT` set, the suite also validates every saved book page's
+schema and its body/footnote sidecar consistency. It allows missing pages during
+recovery. Once recovery finishes, require all 446 PDF pages explicitly:
+
+```sh
+NEWLIGHT_QA_OUTPUT=data/processed/parsed/full-book \
+  NEWLIGHT_QA_REQUIRE_COMPLETE=1 python -m pytest -q
+```
+
+This completeness gate reports the missing page numbers. Passing it verifies
+coverage and file integrity, not character-level accuracy against the scans.
+For a fresh full v6 run, choose a new output directory; retained older checkpoints
+are intentionally incompatible with ordinary v6 resume.
 To recover only absent pages while preserving the consolidated earlier outputs:
 
 ```sh

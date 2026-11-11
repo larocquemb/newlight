@@ -428,7 +428,7 @@ def test_ocr_anchor_disagreement_requires_two_matching_visual_reads(tmp_path,sec
         payload={'text':value,'uncertainties':[]}
         return SimpleNamespace(done_reason='stop',message=SimpleNamespace(content=json.dumps(payload)),
                                model_dump=lambda **_:payload)
-    client=Mock();client.chat.side_effect=[fragment('19th.'),fragment(second),fragment('18th.')]
+    client=Mock();client.chat.side_effect=[fragment('19th.'),fragment(second),fragment('18th.'),fragment('17th.'),fragment('16th.')]
     selected=[{'words':[{'text':'roth','confidence':95,'bbox':[10,10,50,30]}]}]
     layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72}
     if accepted:
@@ -504,7 +504,7 @@ def test_repetition_retry_is_bounded_and_other_errors_not_retried(tmp_path):
         assert client.chat.call_count == calls
 
 
-@pytest.mark.parametrize('third,expected', [('1½','1½'), ('I½','I½'), ('2½',None)])
+@pytest.mark.parametrize('third,expected', [('1½','1½'), ('I½','I½'), ('I 1/2','I½'), ('2½',None)])
 def test_fraction_disagreement_requires_two_exact_visual_readings(tmp_path, third, expected):
     import pymupdf
     pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,100),False)
@@ -514,7 +514,7 @@ def test_fraction_disagreement_requires_two_exact_visual_readings(tmp_path, thir
         payload={'text':text,'uncertainties':[]}
         return SimpleNamespace(done_reason='stop',message=SimpleNamespace(content=json.dumps(payload)),
                                model_dump=lambda **_:payload)
-    client=Mock();client.chat.side_effect=[fragment('I½'),fragment('1½'),fragment(third)]
+    client=Mock();client.chat.side_effect=[fragment('I½'),fragment('1½'),fragment(third),fragment('3½'),fragment('4½')]
     selected=[{'words':[{'text':'134','confidence':95,'bbox':[10,10,50,30]}]}]
     layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72}
     if expected:
@@ -524,7 +524,7 @@ def test_fraction_disagreement_requires_two_exact_visual_readings(tmp_path, thir
     else:
         with pytest.raises(ValueError,match='single-word'):
             regions.retry_word_fragments(client,'model',{},tmp_path,43,layout,selected,run,'fraction')
-    assert client.chat.call_count==3
+    assert client.chat.call_count==(3 if expected else 5)
     assert (run/'fraction.retry_line_01.span_01.confirm_02.response.json').is_file()
 
 
@@ -612,3 +612,177 @@ def test_split_folio_regions_merge_only_when_adjacent_and_clear(tmp_path,far_apa
         assert Path(result[0]['derived_crop']).is_file()
         assert result[0]['bbox_px'][0]<30
         assert (run/'page_0380.number_merge.json').is_file()
+
+
+def test_empty_visual_retry_still_fails_page_and_later_pages_continue(crop_run,monkeypatch):
+    r=crop_run
+    r.layouts[0]['regions'][0]['lines']=[{'words':[{'text':'Visible','confidence':95}]}]
+    dump(r.root/'page_0040.layout.json',r.layouts[0])
+    r.client.chat.side_effect=[response([''])]+r.replies()
+    monkeypatch.setattr(regions,'retry_word_fragments',Mock(return_value=('',[],[])))
+    with pytest.raises(SystemExit,match='1 page'):
+        ocr_parse.main(r.args)
+    assert not (r.output/'page_0040.json').exists()
+    assert (r.output/'page_0041.json').is_file()
+    run=next((r.output/'runs').iterdir())
+    assert (run/'page_0040.region_01.response.json').is_file()
+    assert 'empty region transcription after visual retry' in (run/'page_0040.error.json').read_text()
+
+
+def test_interior_header_duplicate_is_not_silently_removed(crop_run):
+    r=crop_run
+    replies=r.replies();replies[2]=response(['Opening narrative.','A HEADER.','More narrative.'])
+    r.client.chat.side_effect=replies+r.replies()
+    with pytest.raises(SystemExit,match='1 page'):
+        ocr_parse.main(r.args)
+    assert not (r.output/'page_0040.json').exists()
+    assert (r.output/'page_0041.json').is_file()
+    run=next((r.output/'runs').iterdir())
+    assert 'Running header duplicated in body' in (run/'page_0040.error.json').read_text()
+
+
+def test_faded_sepia_ink_is_visible_even_when_red_channel_exceeds100():
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,20,20),False)
+    pix.clear_with(255)
+    pix.set_rect(pymupdf.IRect(5,5,15,15),(106,94,58))
+    assert not any(v<100 for v in pix.samples[::pix.n])
+    assert regions.ink_pixels(pix)>=100
+    pix.clear_with(255)
+    assert regions.ink_pixels(pix)==0
+
+
+def test_currency_symbol_counts_as_visible_token_without_allowing_its_omission():
+    lines=[{'words':[{'text':'b','confidence':86},{'text':'s.','confidence':49},
+                     {'text':'ad,','confidence':46}]}]
+    assert regions.coverage_diagnostics('s. d.',lines)['suspect']
+    result=regions.coverage_diagnostics('£ s. d.',lines,{'b':'£'})
+    assert not result['suspect']
+    assert result['draft_token_count']==result['transcribed_token_count']==3
+    assert regions.coverage_diagnostics('$ s. d.',[{'words':[
+        {'text':'£','confidence':96},{'text':'s.','confidence':96},{'text':'d.','confidence':96}]}])['suspect']
+
+
+def test_visually_adjudicated_punctuation_is_not_still_counted_as_missing_word():
+    lines=[{'words':[{'text':'7]','confidence':96},{'text':'river','confidence':96}]}]
+    assert regions.coverage_diagnostics('?], river',lines)['suspect']
+    assert not regions.coverage_diagnostics('?], river',lines,{'7]':'?],'})['suspect']
+    assert regions.coverage_diagnostics('?],',lines,{'7]':'?],'})['suspect']
+
+
+def test_fragment_crop_expands_past_narrow_ocr_box_but_stays_between_neighbors():
+    line={'bbox':[251,732,1233,778],'letter_height':27,'words':[
+        {'text':'rst.','bbox':[520,741,575,764]},
+        {'text':'1','bbox':[607,732,623,778]},
+        {'text':'set','bbox':[648,742,694,764]}]}
+    x0,y0,x1,y1=regions.fragment_box([line['words'][1]],line,1373,2159)
+    assert 575<x0<605 and 625<x1<648
+    assert y0<732 and y1>778
+
+
+@pytest.mark.parametrize('footer_y,excluded',[(1982,True),(1900,False)])
+def test_header_folio_excludes_only_isolated_mark_below_all_text(footer_y,excluded):
+    import copy
+    layout={'height_px':2159,'regions':[
+        {'id':1,'role':'running_header','bbox_px':[276,194,1007,223]},
+        {'id':2,'role':'page_number','bbox_px':[1108,196,1142,224]},
+        {'id':3,'role':'body','bbox_px':[127,269,1156,1534]},
+        {'id':4,'role':'footnote','bbox_px':[126,1579,1140,1937]},
+        {'id':5,'role':'page_number','bbox_px':[425,footer_y,435,footer_y+18]}]}
+    before=copy.deepcopy(layout)
+    result=regions.folio_regions(layout)
+    assert bool(result[-1].get('folio_exclusion_reason'))==excluded
+    assert result[1]==layout['regions'][1]
+    assert layout==before
+    assert len(result)==len(layout['regions'])  # Candidate retained, never erased.
+
+
+def test_repetition_after_bounded_retry_uses_visual_fragments_and_retains_failure(crop_run,monkeypatch):
+    r=crop_run
+    r.layouts[0]['regions'][0]['lines']=[{'words':[{'text':'A','confidence':96},
+                                                        {'text':'HEADER.','confidence':96}]}]
+    dump(r.root/'page_0040.layout.json',r.layouts[0])
+    error=RuntimeError('token repeat limit reached')
+    r.client.chat.side_effect=[error,error]+r.replies()[1:]+r.replies()
+    reread=Mock(return_value=('A HEADER.',[{'response':'actual-visual-response.json'}],[]))
+    monkeypatch.setattr(regions,'retry_word_fragments',reread)
+    ocr_parse.main(r.args)
+    page=json.loads((r.output/'page_0040.json').read_text())
+    run=next((r.output/'runs').iterdir())
+    chunk=page['regions'][0]['chunks'][0]
+    assert chunk['response'].endswith('.fragment_assembly.json')
+    assert chunk['repetition_response_retries']
+    assert (run/chunk['response']).is_file()
+    assert (run/'page_0040.region_01.attempt_01.error.json').is_file()
+    assert (run/'page_0040.region_01.attempt_02.error.json').is_file()
+    assert not (run/'page_0040.region_01.response.json').exists()
+    reread.assert_called_once()
+
+
+def test_visual_read_key_allows_apostrophe_typography_but_preserves_comma():
+    assert regions.visual_read_key('M’Kie,')==regions.visual_read_key("M'Kie,")
+    assert regions.visual_read_key('M’Kie,')!=regions.visual_read_key('M’Kie')
+
+
+@pytest.mark.parametrize('draft,original,reads,expected',[
+    ('May roth. Two men.','May 10th. Two men.',['May 10th. Two men.']*2,'May 10th. Two men.'),
+    ('May roth.','May ioth,',['May 10th.','May 10th.'],'May 10th.'),
+    ('W of Portage la Prairie The','W of Portage la Prairie',['W of Portage la Prairie']*2,None),
+    ('618','619',['619']*2,None),
+    ('618','6 18',['6 18']*2,None),
+    ('migratorius','[migratorius]',['[migratorius]']*2,None),
+])
+def test_complete_line_consensus_preserves_words_and_numeric_guards(tmp_path,draft,original,reads,expected):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,120,30),False)
+    pix.clear_with(255);pix.set_dpi(72,72);crop=tmp_path/'line.png';pix.save(crop)
+    run=tmp_path/'run';run.mkdir()
+    def reply(text):
+        payload={'lines':[text],'uncertainties':[]}
+        return SimpleNamespace(done_reason='stop',message=SimpleNamespace(content=json.dumps(payload)),
+                               model_dump=lambda **_:payload)
+    client=Mock();client.chat.side_effect=[reply(text) for text in reads]
+    selected=[{'bbox':[0,0,120,30],'words':[{'text':word,'confidence':96} for word in draft.split()]}]
+    text,evidence,uncertainties=regions.reread_complete_line(client,'m',{},crop,selected,original,run,'line',72)
+    assert text==expected
+    assert evidence and (run/evidence[0]['response']).is_file()
+    if expected:
+        assert uncertainties and evidence[-1]['complete_line_consensus']==expected
+    else:
+        assert client.chat.call_count==2
+
+
+def test_complete_line_punctuation_is_preserved_after_false_ocr_word_adjudication():
+    text='aiguilles [rails ?], 5'
+    selected=[{'words':[{'text':w,'confidence':96} for w in 'aiguilles [rails 7], 5'.split()]}]
+    confirmations=[{'transcription':text,'done_reason':'stop'}]
+    assert regions.prefer_complete_line(text,confirmations,selected,{'7],':'?'})==text
+    assert regions.prefer_complete_line(text,[],selected,{'7],':'?'}) is None
+
+
+def test_preferred_full_line_must_not_contradict_confirmed_numeric_word():
+    selected=[{'words':[{'text':'618','confidence':96}]}]
+    confirmations=[{'transcription':'618','done_reason':'stop'}]
+    assert regions.prefer_complete_line('618',confirmations,selected,{'618':'619'}) is None
+
+
+def test_repeated_fragment_abort_splits_only_until_smaller_reads_succeed(tmp_path):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,40),False)
+    pix.clear_with(255);pix.set_dpi(72,72);pix.save(tmp_path/'full.png')
+    run=tmp_path/'run';run.mkdir()
+    def fragment(value):
+        payload={'text':value,'uncertainties':[]}
+        return SimpleNamespace(done_reason='stop',message=SimpleNamespace(content=json.dumps(payload)),
+                               model_dump=lambda **_:payload)
+    client=Mock();client.chat.side_effect=[RuntimeError('token repeat limit'),RuntimeError('token repeat limit'),
+                                         fragment('LEFT'),fragment('RIGHT')]
+    line={'bbox':[5,10,90,30],'letter_height':20,'words':[
+        {'text':'LEFT','confidence':95,'bbox':[5,10,40,30]},
+        {'text':'RIGHT','confidence':95,'bbox':[50,10,90,30]}]}
+    layout={'full_image':'full.png','width_px':100,'height_px':40,'dpi':72}
+    text,evidence,_=regions.retry_word_fragments(client,'m',{},tmp_path,1,layout,[line],run,'repeat')
+    assert text=='LEFT RIGHT' and client.chat.call_count==4
+    assert len(evidence)==2
+    assert (run/'repeat.retry_line_01.span_01.split.json').is_file()
+    assert (run/'repeat.retry_line_01.span_01.attempt_02.error.json').is_file()
