@@ -15,7 +15,7 @@ import re
 import shutil
 import statistics
 import subprocess
-import uuid
+from run_paths import create_run_directory
 
 import pymupdf
 
@@ -232,9 +232,8 @@ def main(argv=None):
     with pymupdf.open(args.input) as pdf:
         if not 1 <= args.start <= args.end <= len(pdf):
             parser.error(f"Require 1 <= start <= end <= {len(pdf)}")
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-        run = args.output / "runs" / run_id
-        run.mkdir(parents=True)
+        run = create_run_directory(args.output)
+        run_id = run.name
         manifest = {"renderer_version": 2, "run_id": run_id,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "source": str(args.input.resolve()), "source_sha256": digest(args.input),

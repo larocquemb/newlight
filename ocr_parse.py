@@ -13,7 +13,7 @@ import statistics
 import subprocess
 from pathlib import Path
 import time
-import uuid
+from run_paths import create_run_directory
 
 from ollama import Client
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
@@ -323,7 +323,10 @@ def main(argv=None):
     parser.add_argument("--repeat-penalty", type=float, default=1.1,
                         help="Repetition penalty (default: 1.1; 1.0 disables the penalty)")
     parser.add_argument("--timeout", type=float, default=900)
-    parser.add_argument("--overwrite", action="store_true", help="Reprocess; previous run artifacts remain retained")
+    recovery = parser.add_mutually_exclusive_group()
+    recovery.add_argument("--overwrite", action="store_true", help="Reprocess; previous run artifacts remain retained")
+    recovery.add_argument("--missing-only", action="store_true",
+                          help="Region mode: preserve source-matching outputs from earlier pipeline versions; recover absent pages only")
     parser.add_argument("--layout-hints", action="store_true",
                         help="Use installed Tesseract to supply measured line positions/heights; retain TSV evidence")
     args = parser.parse_args(argv)
@@ -335,6 +338,8 @@ def main(argv=None):
         parser.error("Require num-ctx >= 8192, num-predict > 0, timeout > 0")
     if not math.isfinite(args.repeat_penalty) or args.repeat_penalty < 1:
         parser.error("Require a finite repeat-penalty >= 1.0")
+    if args.missing_only and not args.renderer_run:
+        parser.error("--missing-only requires --renderer-run")
     if args.renderer_run:
         if args.region_lines < 1:
             parser.error("--region-lines must be positive")
@@ -353,9 +358,8 @@ def main(argv=None):
         parser.exit(1, f"Cannot access model {args.model} at {args.host}: {exc}\n")
     if "vision" not in model_info.get("capabilities", []):
         parser.error(f"Model {args.model} does not report vision support")
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    run = args.output / "runs" / run_id
-    run.mkdir(parents=True)
+    run = create_run_directory(args.output)
+    run_id = run.name
     options = {"temperature": 0, "num_ctx": args.num_ctx,
                "num_predict": args.num_predict, "repeat_penalty": args.repeat_penalty, "seed": 42}
     manifest = {"run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(),

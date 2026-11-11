@@ -112,6 +112,40 @@ def test_resume_preserves_existing_files_and_avoids_model_calls(crop_run):
     assert (r.output / 'page_0040.json').read_bytes() == before
 
 
+def test_missing_only_preserves_earlier_version_source_matched_output(crop_run):
+    r=crop_run;ocr_parse.main(r.args)
+    path=r.output/'page_0040.json';saved=json.loads(path.read_text())
+    saved['region_pipeline_version']=2;dump(path,saved)
+    before=path.read_bytes();r.client.chat.reset_mock()
+    ocr_parse.main(r.args+['--missing-only'])
+    r.client.chat.assert_not_called()
+    assert path.read_bytes()==before
+
+
+def test_missing_only_still_rejects_source_mismatch(crop_run):
+    r=crop_run;ocr_parse.main(r.args)
+    path=r.output/'page_0040.json';saved=json.loads(path.read_text())
+    saved['source_sha256']='other image';dump(path,saved);r.client.chat.reset_mock()
+    with pytest.raises(SystemExit,match='1 page'):
+        ocr_parse.main(r.args+['--missing-only'])
+    r.client.chat.assert_not_called()
+
+
+def test_recovery_index_tracks_success_and_keeps_failed_page_missing(crop_run):
+    r=crop_run;r.output.mkdir()
+    dump(r.output/'recovery_manifest.json',{'scope':[40,41],'pages':[]})
+    r.client.chat.side_effect=[response(['truncated'],reason='length')]+r.replies()
+    with pytest.raises(SystemExit,match='1 page'):
+        ocr_parse.main(r.args+['--missing-only'])
+    index=json.loads((r.output/'recovery_manifest.json').read_text())
+    assert index['present_pages']==1 and index['missing_pages']==[40]
+    assert index['status']=='incomplete_unverified' and index['recovery_run_status']=='failed'
+    assert index['recovered_pages']==[41]
+    for file in index['pages'][0]['files']:
+        assert regions.sha256(Path(file['destination_path']))==file['sha256']
+        assert regions.sha256(Path(file['source_path']))==file['sha256']
+
+
 def test_failure_does_not_save_partial_page_and_later_pages_continue(crop_run):
     r = crop_run
     r.client.chat.side_effect = [response(['truncated'], reason='length')] + r.replies()
@@ -358,3 +392,223 @@ def test_unresolved_single_word_is_not_filled_from_draft(tmp_path):
     with pytest.raises(ValueError,match='single-word'):
         regions.retry_word_fragments(client,'model',{},tmp_path,35,layout,selected,run,'word')
     assert len(list(run.glob('*.response.json')))==1
+
+
+def test_italic_date_and_numeric_ocr_confusion_are_diagnostic_only():
+    for draft,visual,confidence in [('7¢h.','7th.',63),('4o','40',95)]:
+        assert not regions.coverage_diagnostics(visual,[{'words':[
+            {'text':draft,'confidence':confidence}]}])['suspect']
+
+
+@pytest.mark.parametrize('text',['[6]18','6 18','619'])
+def test_amount_must_be_contiguous_and_exact(text):
+    line={'words':[{'text':'618','confidence':97}]}
+    assert regions.coverage_diagnostics(text,[line])['suspect']
+    assert not regions.coverage_diagnostics('618',[line])['suspect']
+
+
+def test_tiny_leader_dots_are_not_counted_as_numeric_words():
+    line={'letter_height':21,'words':[
+        {'text':'Canal','confidence':95,'bbox':[0,0,40,21]},
+        {'text':'tobacco','confidence':95,'bbox':[50,0,120,21]},
+        *[{'text':'0','confidence':60,'bbox':[x,15,x+4,20]} for x in (130,150,170)],
+        {'text':'1','confidence':74,'bbox':[180,0,190,21]},
+        {'text':'bale','confidence':95,'bbox':[200,0,240,21]}]}
+    assert not regions.coverage_diagnostics('Canal tobacco 1 bale',[line])['suspect']
+    assert regions.coverage_diagnostics('Canal tobacco',[line])['suspect']
+
+
+@pytest.mark.parametrize('second,accepted',[('19th.',True),('10th.',False)])
+def test_ocr_anchor_disagreement_requires_two_matching_visual_reads(tmp_path,second,accepted):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,100),False)
+    pix.clear_with(0);pix.set_dpi(72,72);pix.save(tmp_path/'full.png')
+    run=tmp_path/'run';run.mkdir()
+    def fragment(value):
+        payload={'text':value,'uncertainties':[]}
+        return SimpleNamespace(done_reason='stop',message=SimpleNamespace(content=json.dumps(payload)),
+                               model_dump=lambda **_:payload)
+    client=Mock();client.chat.side_effect=[fragment('19th.'),fragment(second),fragment('18th.')]
+    selected=[{'words':[{'text':'roth','confidence':95,'bbox':[10,10,50,30]}]}]
+    layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72}
+    if accepted:
+        text,evidence,uncertainties=regions.retry_word_fragments(client,'model',{},tmp_path,40,layout,selected,run,'date')
+        assert text=='19th.' and uncertainties
+        adjudicated=[e['adjudicated_draft_word'] for e in evidence if 'adjudicated_draft_word' in e]
+        assert regions.coverage_diagnostics(text,selected)['suspect']
+        assert not regions.coverage_diagnostics(text,selected,adjudicated)['suspect']
+        assert (run/'date.retry_line_01.span_01.confirm.response.json').is_file()
+    else:
+        with pytest.raises(ValueError,match='single-word'):
+            regions.retry_word_fragments(client,'model',{},tmp_path,40,layout,selected,run,'date')
+
+
+@pytest.mark.parametrize('text',['UTUMN, 1799.','AUTUMN, 1799.'])
+def test_initial_read_uses_word_context_and_never_duplicates_letter(tmp_path,text):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,100),False)
+    pix.clear_with(0);pix.set_dpi(72,72);pix.save(tmp_path/'full.png')
+    run=tmp_path/'run';run.mkdir()
+    payload={'text':'AUTUMN,','uncertainties':[]}
+    client=Mock();client.chat.return_value=SimpleNamespace(done_reason='stop',
+        message=SimpleNamespace(content=json.dumps(payload)),model_dump=lambda **_:payload)
+    line={'bbox':[25,20,99,30],'letter_height':10,
+          'words':[{'text':'UTUMN,','bbox':[25,20,60,30]}]}
+    layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72}
+    region={'role':'body','bbox_px':[0,0,100,100]}
+    fixed,evidence=regions.inspect_initial(client,'model',{},tmp_path,layout,region,[line],text,run,'initial')
+    assert fixed=='AUTUMN, 1799.'
+    assert evidence['letter']=='A'
+    with pymupdf.open(evidence['crop']) as crop:
+        assert crop[0].rect.width>60  # Includes ordinary letters beside initial.
+
+
+def test_separated_footnote_marker_is_not_a_missing_word(crop_run, monkeypatch):
+    r = crop_run
+    note = r.layouts[0]['regions'][-1]
+    note['lines'] = [{'words': [{'text': w, 'confidence': 96}
+                    for w in '10 Or Bottle portage'.split()]}]
+    dump(r.root/'page_0040.layout.json', r.layouts[0])
+    r.client.chat.side_effect = (r.replies()[:-1] + [response(['Or Bottle portage'], marker='10')]
+                                + r.replies())
+    retry = Mock(side_effect=AssertionError('Separated marker must not trigger reread'))
+    monkeypatch.setattr(regions, 'retry_word_fragments', retry)
+    ocr_parse.main(r.args)
+    page = json.loads((r.output/'page_0040.json').read_text())
+    assert page['footnotes'][0]['marker'] == '10'
+    assert page['footnotes'][0]['text'] == 'Or Bottle portage'
+    retry.assert_not_called()
+
+
+def test_repetition_abort_retries_once_and_retains_both_attempts(tmp_path):
+    client = Mock()
+    client.chat.side_effect = [RuntimeError('token repeat limit reached'), response(['Recovered.'])]
+    result = regions.visual_chat(client, tmp_path, 'test', model='m',
+        messages=[{'role':'user', 'content':'Read image', 'images':[b'image']}],
+        format=regions.RegionLines.model_json_schema(), options={'num_predict':4096})
+    assert result.done_reason == 'stop'
+    assert client.chat.call_count == 2
+    retry = client.chat.call_args.kwargs
+    assert retry['options']['num_predict'] == 1024
+    assert retry['messages'][0]['images'] == [b'image']
+    assert (tmp_path/'test.attempt_01.error.json').is_file()
+    assert (tmp_path/'test.attempt_02.response.json').is_file()
+
+
+def test_repetition_retry_is_bounded_and_other_errors_not_retried(tmp_path):
+    for error, calls in [('token repeat limit reached',2), ('CUDA out of memory',1)]:
+        client=Mock(); client.chat.side_effect=RuntimeError(error)
+        with pytest.raises(RuntimeError, match=error):
+            regions.visual_chat(client,tmp_path,'test',model='m',messages=[{'role':'user','content':'Read'}],
+                format={},options={})
+        assert client.chat.call_count == calls
+
+
+@pytest.mark.parametrize('third,expected', [('1½','1½'), ('I½','I½'), ('2½',None)])
+def test_fraction_disagreement_requires_two_exact_visual_readings(tmp_path, third, expected):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,100),False)
+    pix.clear_with(0);pix.set_dpi(72,72);pix.save(tmp_path/'full.png')
+    run=tmp_path/'run';run.mkdir()
+    def fragment(text):
+        payload={'text':text,'uncertainties':[]}
+        return SimpleNamespace(done_reason='stop',message=SimpleNamespace(content=json.dumps(payload)),
+                               model_dump=lambda **_:payload)
+    client=Mock();client.chat.side_effect=[fragment('I½'),fragment('1½'),fragment(third)]
+    selected=[{'words':[{'text':'134','confidence':95,'bbox':[10,10,50,30]}]}]
+    layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72}
+    if expected:
+        text,evidence,_=regions.retry_word_fragments(client,'model',{},tmp_path,43,layout,selected,run,'fraction')
+        assert text==expected
+        assert any(e.get('visual_consensus')==expected for e in evidence)
+    else:
+        with pytest.raises(ValueError,match='single-word'):
+            regions.retry_word_fragments(client,'model',{},tmp_path,43,layout,selected,run,'fraction')
+    assert client.chat.call_count==3
+    assert (run/'fraction.retry_line_01.span_01.confirm_02.response.json').is_file()
+
+
+def test_blank_indent_with_ordinary_uppercase_word_is_not_a_drop_cap(tmp_path):
+    import pymupdf
+    doc=pymupdf.open(); page=doc.new_page(width=100,height=100)
+    page.insert_text((25,29),'THE route',fontsize=10)
+    page.get_pixmap(dpi=72).save(tmp_path/'full.png'); doc.close()
+    run=tmp_path/'run';run.mkdir()
+    line={'bbox':[25,20,99,30],'letter_height':10,
+          'words':[{'text':'THE','bbox':[25,20,45,30]}]}
+    layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72}
+    region={'role':'body','bbox_px':[0,0,100,100],'lines':[line]}
+    client=Mock()
+    text,evidence=regions.inspect_initial(client,'m',{},tmp_path,layout,region,[line],'THE route',run,'plain')
+    assert text=='THE route' and evidence is None
+    client.chat.assert_not_called()
+
+
+@pytest.mark.parametrize('left,right,equal', [
+    ('I½','I 1/2',True), ('1½','1 1/2',True), ('¾','3⁄4',True),
+    ('I½','1½',False), ('618','6 18',False), ('[Nov','Nov',False),
+    ('word.','word',False), ('go to','goto',False)])
+def test_visual_consensus_only_normalizes_fraction_encoding(left,right,equal):
+    assert (regions.visual_read_key(left)==regions.visual_read_key(right)) is equal
+
+
+def test_empty_measured_line_gets_visual_retry_without_using_ocr_draft(crop_run, monkeypatch):
+    r=crop_run
+    r.layouts[0]['regions'][0]['lines']=[{'words':[{'text':'WRONG','confidence':20}]}]
+    dump(r.root/'page_0040.layout.json',r.layouts[0])
+    r.client.chat.side_effect=[response([''])]+r.replies()[1:]+r.replies()
+    reread=Mock(return_value=('A HEADER.',[{'response':'retained-visual-read'}],[]))
+    monkeypatch.setattr(regions,'retry_word_fragments',reread)
+    ocr_parse.main(r.args)
+    page=json.loads((r.output/'page_0040.json').read_text())
+    assert page['running_headers']==['A HEADER.']
+    assert page['regions'][0]['chunks'][0]['empty_response_retries']
+    assert reread.call_count==1
+
+
+def test_declared_header_leaking_from_edge_crop_is_separated_and_audited(crop_run):
+    r=crop_run
+    replies=r.replies();replies[2]=response(['A HEADER.','','François in the North-','west.'])
+    r.client.chat.side_effect=replies+r.replies()
+    ocr_parse.main(r.args)
+    page=json.loads((r.output/'page_0040.json').read_text())
+    assert page['body'].lstrip().startswith('François')
+    assert next(e for e in page['regions'] if e['role']=='body')['body_edge_header_separations'][0]['removed_text']=='A HEADER.\n'
+
+
+@pytest.mark.parametrize('confirmed,accepted',[('22',True),('2',True),('23',False),(None,False)])
+def test_conflicting_marker_needs_independent_enlarged_glyph(monkeypatch,tmp_path,confirmed,accepted):
+    inspect=Mock(return_value=(confirmed,{'response':'glyph.response.json'}))
+    monkeypatch.setattr(regions,'inspect_marker',inspect)
+    args=(Mock(),'m',{},tmp_path,175,{}, {},tmp_path,'[22] Goose r.','2')
+    if accepted:
+        text,marker,removed,evidence=regions.separate_confirmed_marker(*args)
+        assert text==' Goose r.' and marker==confirmed
+        assert evidence['conflicting_transcribed_markers']==['2','22']
+        assert removed=='[22]'
+    else:
+        with pytest.raises(ValueError,match='does not resolve'):
+            regions.separate_confirmed_marker(*args)
+    inspect.assert_called_once()
+
+
+@pytest.mark.parametrize('far_apart,overlaps_header',[(False,False),(True,False),(False,True)])
+def test_split_folio_regions_merge_only_when_adjacent_and_clear(tmp_path,far_apart,overlaps_header):
+    import pymupdf,copy
+    doc=pymupdf.open();p=doc.new_page(width=200,height=300)
+    p.insert_text((30,30),'346',fontsize=12);p.get_pixmap(dpi=72).save(tmp_path/'full.png');doc.close()
+    parts=[{'id':1,'role':'page_number','bbox_px':[40,20,48,32],'crop':'full.png','lines':[]},
+           {'id':2,'role':'page_number','bbox_px':[30 if not far_apart else 150,20,39 if not far_apart else 159,32], 'crop':'full.png','lines':[]}]
+    header={'id':3,'role':'running_header','bbox_px':[50 if overlaps_header else 80,20,190,32]}
+    layout={'regions':parts+[header],'full_image':'full.png','width_px':200,'height_px':300,'dpi':72}
+    before=copy.deepcopy(layout);run=tmp_path/'run';run.mkdir()
+    result=regions.merge_number_fragments(tmp_path,layout,run,380)
+    assert layout==before
+    if far_apart or overlaps_header:
+        assert result==layout['regions']
+    else:
+        assert len(result)==2
+        assert result[0]['merged_source_region_ids']==[1,2]
+        assert Path(result[0]['derived_crop']).is_file()
+        assert result[0]['bbox_px'][0]<30
+        assert (run/'page_0380.number_merge.json').is_file()
