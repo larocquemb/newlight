@@ -230,6 +230,60 @@ chapter titles and coordinate-scale invariance without running OCR or a model.
 
 ## Editable Word reconstruction
 
+## Unattended proofreading
+
+The expensive visual review is a separate command, so ordinary unit tests never
+start model inference. After editable installation, run:
+
+```sh
+source .venv/bin/activate
+python -m pip install -e .
+newlight-proofread --max-hours 24 --passes 2
+```
+
+On macOS, `caffeinate -i newlight-proofread --max-hours 24 --passes 2` prevents
+idle sleep while it runs. Defaults use `http://arsene:11434`, `ministral-3:14b`
+and a 16384-token context. `--host`, `--model` and `--num-ctx` override them.
+The command reads the current Word export and its matching source/render index
+from `data/processed/book/`. It requires all 446 source sections, snapshots the
+actual DOCX and Word renderings, and reviews overlapping enlarged source strips.
+It starts on PDF480, covers the book once, then repeats with a different seed.
+Both passes use the same model; agreement is not independent human verification.
+
+```sh
+newlight-proofread --status
+newlight-proofread --continue --max-hours 24
+```
+
+Status reports jobs and completed pages separately for each pass. The time limit
+is checked between requests; a final request may take up to `--timeout` seconds.
+Each request, source crop, raw response, result and error is retained under
+`data/processed/proofread/runs/YYYYMMDD-NN/`. `latest.json` points to the current
+run. A run checkpoints every job and resumes only unfinished jobs. Locks prevent
+duplicate runners in the same output directory. Source/code/model changes
+require a new run, rather than silently mixing incompatible results.
+
+Findings are review proposals: the command does not edit OCR or Word. Unreadable
+strips, incomplete responses, missing check categories and truncated output never
+count as completed reviews. Two attempts per unfinished job are allowed in each
+invocation. Failures do not prevent later pages being checked. Final
+`summary.json` and `findings.json` retain results; counts can include repeated
+observations across overlapping strips and passes.
+
+To check completion and unresolved findings after a run:
+
+```sh
+newlight-proofread --check
+NEWLIGHT_PROOFREAD_RUN=data/processed/proofread/runs/YOUR_RUN \
+  python -m pytest tests/test_proofread.py::test_generated_full_book_proofreading_gate -q
+```
+
+The quality gate fails on missing work/evidence, findings, uncertainties or
+unresolved Word page mappings. Even a successful automated gate does not prove
+perfect transcription or replace a source-based human proofread.
+
+## Exporting the book
+
 Generate both formats together, with easy-to-find filenames:
 
 ```sh
@@ -251,6 +305,29 @@ and table-rule annotations. TXT preserves raw OCR; Word applies those audited
 annotations. For Word compatibility, pass `--normalize-with /path/to/soffice`
 to round-trip the DOCX through LibreOffice before publishing; the raw DOCX is
 retained and body/note text and reference counts are checked after normalization.
+
+Word reconstruction also compares saved OCR line breaks with measured source
+lines on every selected page. It joins adjacent nonblank fragments only when their
+complete text exactly matches one measured printed line, including case and
+punctuation. Every join and bounding box is audited; original OCR remains unchanged.
+Unmatched lines remain review candidates rather than being silently rewritten.
+
+For side-by-side source and Word review, first render the DOCX to PDF and PNGs,
+then supply the retained enriched model and render paths:
+
+```sh
+newlight-reconstruct \
+  --compare-model data/processed/book/runs/YOUR_RUN/book.enriched.json \
+  --rendered-pdf PATH_TO_RENDER/newlight.pdf \
+  --rendered-images PATH_TO_RENDER --output data/processed/book
+```
+
+Open `data/processed/book/comparison.html` in a browser. Choose the source PDF
+page to see its scan beside matching rendered Word pages. Text anchors can cross
+physical page boundaries; ambiguous or absent anchors are explicitly flagged for
+manual mapping. This generates an index for all source pages, not a claim that
+all pages have been proofread. Native Word pagination can differ from LibreOffice.
+Plain-text export continues to preserve raw OCR line breaks.
 
 To generate a combined plain-text book from all 446 saved OCR pages:
 

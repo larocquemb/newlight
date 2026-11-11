@@ -5,16 +5,19 @@ Run document authoring with the Codex document runtime (python-docx/lxml).
 Missing pages and unresolved footnote links fail closed; OCR remains unverified.
 """
 import argparse
+from bisect import bisect_right
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from .run_paths import create_run_directory
 import zipfile
 from xml.etree import ElementTree as ET
@@ -203,6 +206,128 @@ def table_row(text):
     return {'cells':[label,match.group(),text[match.end():].strip()], 'source_text':text}
 
 
+def restore_measured_lines(text, measured_lines):
+    """Join OCR fragments only when they exactly reproduce one measured line.
+
+    Whitespace is compared independently of spelling, punctuation and case.
+    Blank paragraph boundaries are never crossed. No draft words are inserted.
+    """
+    canonical=lambda value:' '.join(value.split())
+    targets={canonical(line['text']):line for line in measured_lines if line['text'].strip()}
+    lines=text.split('\n');result=[];changes=[];index=0
+    while index<len(lines):
+        match=None
+        if lines[index].strip():
+            for end in range(index+2,min(index+8,len(lines))+1):
+                parts=lines[index:end]
+                if any(not part.strip() for part in parts):break
+                joined=' '.join(parts)
+                if canonical(joined) in targets:
+                    match=(end,joined,targets[canonical(joined)])
+                    break
+        if match:
+            end,joined,source=match
+            before='\n'.join(lines[index:end])
+            result.append(joined)
+            changes.append({'before':before,'after':joined,'source_line':source['text'],
+                            'source_bbox_px':source.get('bbox'),
+                            'basis':'Exact text match to one measured source line; only internal newlines changed'})
+            index=end
+        else:result.append(lines[index]);index+=1
+    return '\n'.join(result),changes
+
+
+def write_page_comparison(model, rendered_pdf, image_dir, output_dir):
+    """Create a page-by-page visual review index, without claiming proofreading."""
+    import pymupdf
+    output_dir.mkdir(parents=True,exist_ok=True)
+    canonical=lambda value:''.join(c for c in unicodedata.normalize('NFKD',value).casefold() if c.isalpha())
+    with pymupdf.open(rendered_pdf) as pdf:
+        rendered=[]
+        for page in pdf:
+            # Exclude small note/header type and footer fields. Concatenating
+            # body text lets an anchor cross a physical Word page boundary.
+            spans=[span['text'] for block in page.get_text('dict')['blocks']
+                   for line in block.get('lines',[]) for span in line['spans']
+                   if span['size']>=9.8 and 60<=span['bbox'][1]<page.rect.height-65]
+            rendered.append(canonical(''.join(spans)))
+    offsets=[0]
+    for text in rendered:offsets.append(offsets[-1]+len(text))
+    continuous=''.join(rendered)
+    def locations(anchor,ending=False):
+        found=[];position=0
+        if len(anchor)<10:return found
+        while (index:=continuous.find(anchor,position))!=-1:
+            page=bisect_right(offsets,index+len(anchor)-1 if ending else index)
+            if page not in found:found.append(page)
+            position=index+1
+        return found
+    images={int(re.search(r'(\d+)\.png$',p.name).group(1)):p
+            for p in image_dir.glob('*.png') if re.search(r'(\d+)\.png$',p.name)}
+    comparisons={p['pdf_page']:p for p in model.get('page_comparisons',[])}
+    pages=[]
+    for page in model['pages']:
+        prose=[b['text'] for b in page['blocks'] if b['kind']=='paragraph' and len(b['text'].split())>=12]
+        if not prose:prose=[b['text'] for b in page['blocks'] if b['kind']!='table' and b.get('text')]
+        start=canonical(' '.join(prose[0].split()[:12])) if prose else ''
+        end=canonical(' '.join(prose[-1].split()[-12:])) if prose else ''
+        starts=locations(start)
+        ends=locations(end,ending=True)
+        mapped=list(range(starts[0],ends[0]+1)) if len(starts)==len(ends)==1 and starts[0]<=ends[0] else []
+        measured=comparisons.get(page['pdf_page'],{})
+        image=measured.get('source_image')
+        pages.append({'pdf_page':page['pdf_page'],'printed_page':page['printed_page_number'],
+                      'source_image':os.path.relpath(image,output_dir) if image else None,
+                      'rendered_pages':mapped,'start_candidates':starts,'end_candidates':ends,
+                      'word_images':[os.path.relpath(images[n],output_dir) for n in mapped if n in images],
+                      'mapping_status':'located by text anchors; verify visually' if mapped else 'manual mapping required',
+                      'body_line_joins':len(measured.get('joined_body_lines',[])),
+                      'note_line_joins':len(measured.get('joined_note_lines',[])),
+                      'unmatched_body_lines':len(measured.get('body_lines_without_exact_measured_match',[]))})
+    anchored=sum(bool(p['rendered_pages']) for p in pages)
+    for index,page in enumerate(pages):
+        if page['rendered_pages']:continue
+        previous=pages[index-1]['rendered_pages'] if index else []
+        following=next((p['rendered_pages'] for p in pages[index+1:] if p['rendered_pages']),[])
+        low=previous[-1] if previous else 1
+        high=following[0]-1 if following else len(rendered)
+        candidates=[n for n in page['start_candidates'] if low<=n<=high]
+        start=candidates[0] if len(candidates)==1 else low+1
+        if start<=high:
+            page['rendered_pages']=list(range(start,high+1))
+            page['word_images']=[os.path.relpath(images[n],output_dir) for n in page['rendered_pages'] if n in images]
+            page['mapping_status']='candidate range inferred from neighboring sections; manual mapping required'
+    report={'source_pages':len(pages),'rendered_pages':len(rendered),
+            'mapped_pages':anchored,'candidate_ranges':sum(bool(p['rendered_pages']) for p in pages)-anchored,
+            'status':'Visual review pending; text anchors locate pages, not prove accuracy',
+            'renderer':'LibreOffice; native Word pagination can differ','pages':pages}
+    (output_dir/'page-comparison.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    payload=json.dumps(pages,ensure_ascii=False).replace('<','\\u003c')
+    html='''<!doctype html><html lang="en-CA"><meta charset="utf-8">
+<title>Source PDF and Word comparison</title><style>
+body{font:16px system-ui;margin:20px;background:#eee;color:#222}header{position:sticky;top:0;background:#fff;padding:12px;z-index:2}
+select,button{font:inherit;padding:6px;margin:4px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+section{background:white;padding:12px}img{width:100%;height:auto;display:block;margin-bottom:12px}#status{font-size:14px}
+</style><header><b>Source PDF and Word reconstruction</b><br>
+<button id="prev">Previous</button><select id="page"></select><button id="next">Next</button>
+<div id="status"></div><small>Visual review required. Word images use LibreOffice pagination. Table-only or ambiguous pages require manual mapping.</small></header>
+<div class="columns"><section><h2>Original scan</h2><div id="source"></div></section>
+<section><h2>Word rendering</h2><div id="word"></div></section></div><script>
+const pages=PAYLOAD,select=document.getElementById('page');
+pages.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`PDF ${p.pdf_page} / printed ${p.printed_page}${p.body_line_joins+p.note_line_joins?' — line breaks repaired':''}`;select.append(o)});
+function img(parent,url){const i=document.createElement('img');i.src=url;i.loading='lazy';parent.append(i)}
+function show(){const p=pages[Number(select.value)],s=document.getElementById('source'),w=document.getElementById('word');s.replaceChildren();w.replaceChildren();
+if(p.source_image)img(s,p.source_image);p.word_images.forEach(url=>img(w,url));
+if(!p.word_images.length)w.textContent='No unique mapping. Locate this section manually in Word.';
+document.getElementById('status').textContent=`${p.mapping_status}. Rendered pages: ${p.rendered_pages.join(', ')||'unresolved'}. Repaired body/note breaks: ${p.body_line_joins}/${p.note_line_joins}. Lines differing from independent OCR: ${p.unmatched_body_lines}.`;}
+select.onchange=show;document.getElementById('prev').onclick=()=>{select.value=Math.max(0,Number(select.value)-1);show()};
+document.getElementById('next').onclick=()=>{select.value=Math.min(pages.length-1,Number(select.value)+1);show()};
+const requested=pages.findIndex(p=>String(p.pdf_page)===location.hash.slice(1));if(requested>=0)select.value=requested;show();
+</script></html>'''.replace('PAYLOAD',payload)
+    destination=output_dir/'comparison.html';destination.write_text(html,encoding='utf-8')
+    return destination,report
+
+
 def paragraph_indent(text, layout, lines):
     """Measure first-line indentation, leaving page continuations flush left."""
     best=max(lines,key=lambda line:SequenceMatcher(None,normal(line['text']),normal(text)).ratio(),default=None)
@@ -296,7 +421,7 @@ def enrich(ocr_dir, renderer_run, start, end, annotations=None, available_only=F
     annotations=annotations or {}
     missing=[n for n in range(start,end+1) if not (ocr_dir/f'page_{n:04d}.json').is_file()]
     if missing and not available_only:raise ValueError(f'Missing OCR pages: {missing}; full-book export requires all selected pages')
-    pages=[];notes=[];active=None;chapter=0;by_key={};by_page={};audit=[];issues=[]
+    pages=[];notes=[];active=None;chapter=0;by_key={};by_page={};audit=[];issues=[];comparisons=[]
     for number in range(start,end+1):
         if number in missing:continue
         source=ocr_dir/f'page_{number:04d}.json'
@@ -331,6 +456,24 @@ def enrich(ocr_dir, renderer_run, start, end, annotations=None, available_only=F
                 if scope=='footnote':target['text']=changed
                 else:data[scope]=changed if scope=='body' else changed.split('\n')
                 audit.append({'pdf_page':number,**fix,'basis':'source-image inspection supplied in annotations'})
+        measured_body=[line for region in layout['regions'] if region['role']=='body' for line in region['lines']]
+        data['body'],line_changes=restore_measured_lines(data['body'],measured_body)
+        for change in line_changes:audit.append({'pdf_page':number,'scope':'body',**change})
+        measured_notes=[line for region in layout['regions'] if region['role']=='footnote' for line in region['lines']]
+        note_changes=[]
+        for note_index,note in enumerate(data['footnotes']):
+            note['text'],changes=restore_measured_lines(note['text'],measured_notes)
+            note_changes.extend({'note_index':note_index,**change} for change in changes)
+            for change in changes:audit.append({'pdf_page':number,'scope':'footnote','note_index':note_index,**change})
+        measured={' '.join(line['text'].split()) for line in measured_body}
+        body_lines=[line for line in data['body'].splitlines() if line.strip()]
+        unmatched=[line for line in body_lines if ' '.join(line.split()) not in measured]
+        comparisons.append({'pdf_page':number,'source_image':str((renderer_run/layout['full_image']).resolve()) if layout.get('full_image') else None,
+                            'measured_body_lines':len(measured_body),'export_body_lines':len(body_lines),
+                            'joined_body_lines':line_changes,'joined_note_lines':note_changes,
+                            'body_lines_without_exact_measured_match':unmatched,
+                            'status':'review_required',
+                            'limitations':'Measured text is independent OCR, not verified ground truth; tables/headings and punctuation differences can cause unmatched lines'})
         if re.search(r'(?m)^CHAPTER\s+[IVXLCDM]+\.',data['body']):chapter+=1
         for note in data['footnotes']:
             marker=marker_number(note['marker'])
@@ -404,7 +547,7 @@ def enrich(ocr_dir, renderer_run, start, end, annotations=None, available_only=F
                 note['anchor_at_page_start']=True
                 note['references']=[{'pdf_page':note['parts'][0]['pdf_page'],'marker':note['marker'],'editorial_anchor':True}]
                 issues.append({'pdf_page':note['parts'][0]['pdf_page'],'kind':'note_reference_unlocated','marker':note['marker']})
-    return {'schema_version':1,'pages':pages,'footnotes':notes,'corrections':audit,
+    return {'schema_version':1,'pages':pages,'footnotes':notes,'corrections':audit,'page_comparisons':comparisons,
             'style_basis':'Source geometry estimates; italic phrases supplied by reviewed annotations',
             'font_family':'Times New Roman','font_basis':'Approximate substitute; historical typeface not identified',
             'body_size_pt':13.0,'note_size_pt':9.5,'note_line_height_pt':10.5,'text_width_pt':325.0,
@@ -912,7 +1055,10 @@ def audit_footnote_pagination(model, rendered_page_texts):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--ocr-dir',type=Path,required=True)
+    parser.add_argument('--ocr-dir',type=Path)
+    parser.add_argument('--compare-model',type=Path,help='Enriched model to compare visually with a rendered Word PDF')
+    parser.add_argument('--rendered-pdf',type=Path)
+    parser.add_argument('--rendered-images',type=Path)
     parser.add_argument('--renderer-run',type=Path)
     parser.add_argument('--start',type=int,default=35);parser.add_argument('--end',type=int,default=480)
     parser.add_argument('--annotations',type=Path)
@@ -935,6 +1081,15 @@ def main(argv=None):
     parser.add_argument('--footnote-pagination',choices=['source','flow'],default='source',
                         help='Anchor continuation segments to source pages (default), or let whole native notes flow')
     args=parser.parse_args(argv)
+    if args.compare_model:
+        if not args.rendered_pdf or not args.rendered_images:
+            parser.error('--compare-model requires --rendered-pdf and --rendered-images')
+        viewer,report=write_page_comparison(json.loads(args.compare_model.read_text()),args.rendered_pdf,
+                                          args.rendered_images,args.output or ROOT/'data/processed/book')
+        print(viewer,flush=True)
+        print(f"Mapped {report['mapped_pages']}/{report['source_pages']} source pages; visual review remains pending",flush=True)
+        return
+    if args.ocr_dir is None:parser.error('--ocr-dir is required unless --compare-model is used')
     if args.start>args.end:parser.error('Require start <= end')
     if args.both and args.enrich_only:parser.error('--both cannot be combined with --enrich-only')
     if args.text_only:
@@ -965,6 +1120,11 @@ def main(argv=None):
     model['custom_properties']=reconstruction_properties(model,run.name)
     if args.annotations:model['custom_properties']['AnnotationsSHA256']=digest(args.annotations)
     (run/'book.enriched.json').write_text(json.dumps(model,ensure_ascii=False,indent=2)+'\n')
+    (run/'page-comparison.json').write_text(json.dumps({
+        'source_pages':len(model['pages']),'status':'automated comparison; visual/source review pending',
+        'body_line_joins':sum(len(p['joined_body_lines']) for p in model['page_comparisons']),
+        'note_line_joins':sum(len(p['joined_note_lines']) for p in model['page_comparisons']),
+        'pages':model['page_comparisons']},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     if args.annotations:
         (run/'annotations.json').write_bytes(args.annotations.read_bytes())
     audit={'source_range':[args.start,args.end],'source_pages':len(model['pages']),'logical_footnotes':len(model['footnotes']),
@@ -986,6 +1146,18 @@ def main(argv=None):
         audit['text_sha256']=digest(text_output)
         print(args.output/'newlight.txt',flush=True)
     (run/'audit.json').write_text(json.dumps(audit,ensure_ascii=False,indent=2)+'\n')
+    if not args.enrich_only:
+        latest_path=args.output/'latest.json'
+        latest=json.loads(latest_path.read_text()) if latest_path.is_file() else {}
+        latest.update({'created_at':datetime.now(timezone.utc).isoformat(),
+                       'source_pdf_pages':[args.start,args.end],'source_page_count':len(model['pages']),
+                       'word':str((args.output/'newlight.docx').resolve()),'docx_sha256':audit['docx_sha256'],
+                       'word_audit':str((run/'audit.json').resolve()),'review_required':True,
+                       'layout_comparison':str((run/'page-comparison.json').resolve())})
+        if args.both:
+            latest.update({'text':str((args.output/'newlight.txt').resolve()),'text_sha256':audit['text_sha256'],
+                           'text_audit':str((text_output.parent/'text-audit.json').resolve())})
+        latest_path.write_text(json.dumps(latest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     print('Enriched model:',run/'book.enriched.json',flush=True)
 
 

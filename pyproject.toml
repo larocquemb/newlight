@@ -20,6 +20,7 @@ newlight-render-v2 = "newlight.pdf_renderer_v2:main"
 newlight-ocr = "newlight.ocr_parse:main"
 newlight-reconstruct = "newlight.book_reconstruct:main"
 newlight-legacy-ocr = "newlight.ocr:main"
+newlight-proofread = "newlight.proofread:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

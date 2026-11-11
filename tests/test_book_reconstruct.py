@@ -8,6 +8,59 @@ from newlight.book_reconstruct import audit_docx, enrich, styled_runs, table_row
 from newlight.book_reconstruct import audit_footnote_pagination, source_page_footnotes, custom_properties_xml, justify_footnote_last_line
 from newlight.book_reconstruct import export_plain_text, main
 from newlight.book_reconstruct import publish_export
+from newlight.book_reconstruct import restore_measured_lines
+from newlight.book_reconstruct import write_page_comparison
+
+
+def test_comparison_anchors_cross_rendered_pages_without_headers_or_notes(tmp_path,monkeypatch):
+    import pymupdf
+    from types import SimpleNamespace
+    words='Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima'
+    class Page:
+        rect=SimpleNamespace(height=800)
+        def __init__(self,text):self.text=text
+        def get_text(self,mode):
+            return {'blocks':[{'lines':[{'spans':[
+                {'text':'Running header','size':9.5,'bbox':[0,40,200,50]},
+                {'text':self.text,'size':12,'bbox':[0,100,400,120]},
+                {'text':'Editorial note','size':9.5,'bbox':[0,600,400,620]}]}]}]}
+    class PDF(list):
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+    monkeypatch.setattr(pymupdf,'open',lambda path:PDF([Page(' '.join(words.split()[:6])),Page(' '.join(words.split()[6:]))]))
+    image_dir=tmp_path/'images';image_dir.mkdir()
+    for n in [1,2]:(image_dir/f'page-{n}.png').touch()
+    source=tmp_path/'scan.png';source.touch()
+    model={'pages':[{'pdf_page':480,'printed_page_number':'446','blocks':[{'kind':'paragraph','text':words}]}],
+           'page_comparisons':[{'pdf_page':480,'source_image':str(source)}]}
+    viewer,report=write_page_comparison(model,tmp_path/'render.pdf',image_dir,tmp_path/'review')
+    assert viewer.is_file()
+    assert report['mapped_pages']==1
+    assert report['pages'][0]['rendered_pages']==[1,2]
+    assert len(report['pages'][0]['word_images'])==2
+
+
+def test_last_page_line_fragments_restore_source_wrapping_without_rewording():
+    before='autumn, average 110 pounds.\nThese weights are exclusive\nof the offals.'
+    measured=[{'text':'autumn, average 110 pounds. These weights are exclusive','bbox':[186,495,1206,537]},
+              {'text':'of the offals.'}]
+    after,changes=restore_measured_lines(before,measured)
+    assert after=='autumn, average 110 pounds. These weights are exclusive\nof the offals.'
+    assert after.split()==before.split()
+    assert len(changes)==1
+    assert changes[0]['source_bbox_px']==[186,495,1206,537]
+
+
+@pytest.mark.parametrize('before,measured',[
+    ('A sentence.\n\nAnother sentence.','A sentence. Another sentence.'),
+    ('Original spelling\ncontinues.','Corrected spelling continues.'),
+    ('Case matters\nhere.','case matters here.'),
+    ('Do not remove;\npunctuation.','Do not remove, punctuation.'),
+])
+def test_measured_line_restoration_never_guesses_words_or_crosses_paragraphs(before,measured):
+    after,changes=restore_measured_lines(before,[{'text':measured}])
+    assert after==before
+    assert changes==[]
 
 
 @pytest.mark.parametrize('tamper',[False,True])
