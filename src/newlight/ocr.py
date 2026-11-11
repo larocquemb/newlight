@@ -15,8 +15,8 @@ from pathlib import Path
 from ollama import Client
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGES = ROOT / "pdf_pages"
-OUTPUT = ROOT / "data" / "processed"
+IMAGES = ROOT / "data/processed/pdf_pages"
+OUTPUT = ROOT / "data/processed/legacy-ocr"
 DEFAULT_MODEL = "mistral-small3.2:24b"
 
 PROMPT = """You are transcribing one scanned page from the historical book

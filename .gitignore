@@ -1,5 +1,7 @@
-<<<<<<< HEAD
-# Python
+# macOS
+.DS_Store
+
+# Python environments and caches
 __pycache__/
 *.py[cod]
 .venv/
@@ -7,15 +9,12 @@ venv/
 llm-env/
 .ipynb_checkpoints/
 .pytest_cache/
+.coverage
+htmlcov/
 
-# Secrets
+# Local secrets
 .env
 .env.*
 
-# Generated PDF pages
-=======
-tmp/
->>>>>>> fa2971e (Add reproducible PDF rendering pipeline)
-pdf_pages/
-pdf_pages_old/
-tmp/
+# Generated page images, layout runs, OCR output and scratch files
+/data/processed/

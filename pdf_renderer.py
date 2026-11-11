@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_INPUT = (
     PROJECT_ROOT / "data/external/newlightonearlyh01henr.pdf"
 )
-DEFAULT_OUTPUT = PROJECT_ROOT / "pdf_pages"
+DEFAULT_OUTPUT = PROJECT_ROOT / "data/processed/pdf_pages"
 
 
 def render_pdf(

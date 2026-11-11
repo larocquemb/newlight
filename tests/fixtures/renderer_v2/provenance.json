@@ -1,0 +1,20 @@
+{
+  "source_sha256": "da8a228e1afbdbaa17ab4638001dd6fbd6c01ec63b89562ea760ddf6ff0b14cf",
+  "tesseract_version": "tesseract 5.5.4",
+  "pymupdf_version": "1.28.2",
+  "source": "data/external/newlightonearlyh01henr.pdf",
+  "dpi": 200,
+  "image_dimensions": [
+    1403,
+    2325
+  ],
+  "command": "python pdf_renderer_v2.py --start 35 --end 44",
+  "fixture_kind": "Original Tesseract TSV; OCR text is unverified, region expectations visually reviewed against source scans.",
+  "fixtures": {
+    "page_0038.tsv": "8ef45f4292fab1b0591a8257f0be328f902439a98128dc5adabf19c6e79fd277",
+    "page_0039.tsv": "49a8cf54bb474aff29a2548e5d2c3a1db93d8eeb7c38d165a14154d0f3158fd9",
+    "page_0042.tsv": "d760720db5651af59bc0e20d74153c0e307c425e5d0897e0117358abf8a80fb2",
+    "page_0040.tsv": "647d4f4177811ef2960a868565c0326aabc3c2cec5e077bfd04c8a775a2c9359",
+    "page_0041.tsv": "b06ef22931779c08203aad14765c8b0f5406071a471e46beb0be4a7f962d2bb7"
+  }
+}
