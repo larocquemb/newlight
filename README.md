@@ -126,6 +126,26 @@ normalized. Isolated footer marks below all text are retained as non-folio
 candidates when a separate folio aligns with the header. Repeated server aborts
 can fall back to smaller visual spans, with raw errors and derived assemblies
 distinguished in evidence. All retry paths remain bounded and reviewable.
+Pipeline v7 accepts genuine opening brackets after word-level adjudication and
+supports source review annotations in `ocr_reviews.json` (`--reviews PATH`).
+Reviews are explicitly attributed to agent visual inspection, bound to original
+image/layout hashes, and copied into each run. They correct reviewed table roles,
+note boundaries, and ambiguous dagger/ditto glyphs without changing renderer
+artifacts. Reviewed table rows are cropped between neighboring row centers to
+avoid reading the row above. Every original line must survive a reviewed split.
+The same row boundaries apply to fragment retries. Rotated table headers are
+read whole rather than as horizontal OCR strips. Reviews can locate omitted
+lines without inventing an OCR draft, and can supply explicitly reviewed note
+markers. Extra-prose checks distinguish genuinely new words from numeric
+columns, Roman-style digits, fractions and fused OCR words. Recovery indexes
+update at startup and after overwrite corrections as well as missing-page runs.
+Pipeline v8 does not classify words already present in low-confidence or small
+OCR boxes as new insertions. Visually adjudicated words explain the vocabulary
+of accepted fragments; their assembly retains missing-token and numeric checks
+without reapplying the untrusted draft vocabulary as an insertion test. Reviewed
+tables can reach complete-line consensus despite leader-dot/rule formatting
+differences, while separate numbers and bracket/question-mark content remain
+distinct. Narrative punctuation comparisons stay strict.
 Pipeline revisions invalidate older cached outputs: choose a fresh output
 directory or explicitly use `--overwrite` after an extraction change.
 Successful outputs can be resumed with matching layout/model/settings; use a fresh output directory
@@ -136,7 +156,7 @@ context for a one-page retry; their hashes are recorded and files left untouched
 The older whole-page mode is available by omitting `--renderer-run`.
 
 The current `data/processed/parsed/full-book/` recovery dataset combines retained
-earlier pipeline outputs with v6 missing-page recovery. Its `recovery_manifest.json` records
+earlier pipeline outputs with v8 missing-page recovery. Its `recovery_manifest.json` records
 every source path/hash and all missing pages; it is incomplete and unverified.
 Historical runs remain unchanged. Check its generated-page regressions with:
 
@@ -156,8 +176,8 @@ NEWLIGHT_QA_OUTPUT=data/processed/parsed/full-book \
 
 This completeness gate reports the missing page numbers. Passing it verifies
 coverage and file integrity, not character-level accuracy against the scans.
-For a fresh full v6 run, choose a new output directory; retained older checkpoints
-are intentionally incompatible with ordinary v6 resume.
+For a fresh full v8 run, choose a new output directory; retained older checkpoints
+are intentionally incompatible with ordinary v8 resume.
 To recover only absent pages while preserving the consolidated earlier outputs:
 
 ```sh

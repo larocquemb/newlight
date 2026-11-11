@@ -312,6 +312,8 @@ def main(argv=None):
     parser.add_argument("--images", type=Path, default=ROOT / "data/processed/pdf_pages")
     parser.add_argument("--renderer-run", type=Path,
                         help="Renderer v2 run directory; transcribe its region crops independently")
+    parser.add_argument("--reviews", type=Path, default=ROOT / 'ocr_reviews.json',
+                        help="Hash-checked source review annotations for region mode")
     parser.add_argument("--region-lines", type=int, default=1,
                         help="Maximum prose lines per region request; table rows use one (default: 1)")
     parser.add_argument("--output", type=Path, default=ROOT / "data/processed/parsed")

@@ -1,0 +1,580 @@
+{
+  "version": 1,
+  "reviewer": "Codex visual inspection (not human verification)",
+  "pages": {
+    "233": {
+      "image_sha256": "16f71ea2a31919e399bc4119e7be5a0c5f307395dcb774cf58129383b7ba6231",
+      "layout_sha256": "8b7ecd4778777adc33e366dd0843a9880058a7a7aa4a30271b7efd116aea9df9",
+      "basis": "Agent visual inspection of the original scanned page and retained crop; OCR remains subject to human review.",
+      "words": [
+        {
+          "draft_text": "t+",
+          "bbox_px": [
+            709,
+            1575,
+            720,
+            1592
+          ],
+          "text": "†",
+          "basis": "Visible dagger between Not given. and Inland packs on scanned page233."
+        }
+      ],
+      "region_roles": {
+        "5": "table",
+        "6": "table"
+      }
+    },
+    "235": {
+      "image_sha256": "c542adc8e959208cf636fa2ec0a81e3cc0cbf3a817f65e758c7bcf88fed8b5ee",
+      "layout_sha256": "4b1c72dca2e4477e15089fff4c9bc14d151ded9bd40e06556837b52b6c04b71c",
+      "basis": "Agent visual inspection of the original scanned page and retained crop; OCR remains subject to human review.",
+      "words": [
+        {
+          "draft_text": "ad",
+          "bbox_px": [
+            632,
+            1618,
+            687,
+            1638
+          ],
+          "text": "“",
+          "basis": "Visible pair of raised ditto strokes in the carcajoux table row; not the OCR letters ad."
+        },
+        {
+          "draft_text": "3.5",
+          "bbox_px": [
+            809,
+            1622,
+            864,
+            1643
+          ],
+          "text": "3 5",
+          "basis": "Agent visual inspection: separate pounds3 and shillings5 columns, not the fused number35."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            896,
+            1623,
+            910,
+            1637
+          ],
+          "text": "0",
+          "basis": "Agent visual inspection: the final pence column is numeric zero."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            894,
+            1183,
+            909,
+            1198
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            850,
+            1272,
+            865,
+            1286
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            894,
+            1271,
+            909,
+            1285
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            850,
+            1301,
+            865,
+            1315
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            895,
+            1330,
+            909,
+            1345
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            850,
+            1359,
+            865,
+            1374
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            895,
+            1359,
+            910,
+            1373
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            895,
+            1418,
+            910,
+            1433
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            895,
+            1447,
+            910,
+            1461
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            851,
+            1477,
+            865,
+            1491
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            894,
+            1477,
+            909,
+            1491
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            851,
+            1535,
+            866,
+            1550
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        },
+        {
+          "draft_text": "0",
+          "bbox_px": [
+            895,
+            1535,
+            910,
+            1549
+          ],
+          "text": "0",
+          "basis": "Agent source review of the currency column: round glyph is numeric zero from its £/s/d context, not a letter or bracket."
+        }
+      ],
+      "region_roles": {
+        "4": "body",
+        "5": "table",
+        "6": "table",
+        "7": "table",
+        "8": "table",
+        "9": "table",
+        "10": "table"
+      },
+      "row_bounds": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    "255": {
+      "image_sha256": "96b30204388253bc87358e4b60e4615c0931da42b7020b1ab7af63a9f070efd8",
+      "layout_sha256": "2c8b5e9503872790a9d113a70f44ffe1a82c5bc054094383b085598edb98345c",
+      "basis": "Agent visual inspection of the original scanned page and retained crop; OCR remains subject to human review.",
+      "region_roles": {
+        "4": "table",
+        "5": "table",
+        "6": "table",
+        "7": "table",
+        "8": "table",
+        "9": "table",
+        "10": "table",
+        "11": "table",
+        "12": "table",
+        "13": "table",
+        "14": "table"
+      },
+      "split_regions": [
+        {
+          "region_id": 15,
+          "parts": [
+            {
+              "id": 15,
+              "start": 0,
+              "stop": 7
+            },
+            {
+              "id": 16,
+              "start": 7,
+              "stop": 9,
+              "marker_candidate": "23"
+            },
+            {
+              "id": 17,
+              "start": 9,
+              "stop": 16,
+              "marker_candidate": "24",
+              "reviewed_marker": "24"
+            }
+          ]
+        }
+      ],
+      "replace_regions": [
+        {
+          "region_ids": [
+            4
+          ],
+          "id": 4,
+          "role": "table",
+          "bbox_px": [
+            133,
+            450,
+            1155,
+            742
+          ],
+          "rotation": 90,
+          "table_header": true,
+          "basis": "Agent visual review: multi-column vertical header must be read as a whole rotated image, not horizontal OCR strips."
+        }
+      ],
+      "additional_regions": [
+        {
+          "id": 18,
+          "role": "body",
+          "bbox_px": [
+            230,
+            395,
+            1060,
+            432
+          ],
+          "basis": "Agent visual review: table title above header; separately retained when rotating the column-label block."
+        }
+      ]
+    },
+    "293": {
+      "image_sha256": "fcd674abc92e1c1689dcba96171305991b26a1dcfc6557dd6ea5ed4b3fcb3bab",
+      "layout_sha256": "5c226f09091ba5ff5796b533934b2bd7f302a557f16c3c5a11fc6a693fc0f1e4",
+      "basis": "Agent visual inspection of the original scanned page and retained crop; OCR remains subject to human review.",
+      "region_roles": {
+        "4": "table",
+        "5": "table",
+        "6": "table",
+        "7": "table",
+        "8": "table",
+        "9": "table",
+        "10": "table",
+        "11": "table",
+        "12": "table",
+        "13": "table",
+        "14": "table",
+        "15": "table",
+        "16": "table",
+        "17": "table",
+        "18": "table",
+        "19": "table",
+        "3": "body",
+        "20": "footnote"
+      },
+      "additional_regions": [
+        {
+          "id": 21,
+          "role": "table",
+          "bbox_px": [
+            190,
+            1256,
+            1185,
+            1281
+          ],
+          "basis": "Agent visual inspection of source page293: omitted final table row, 3 ditto gum with final-column value3. No fabricated OCR word draft."
+        }
+      ],
+      "replace_regions": [
+        {
+          "region_ids": [
+            4,
+            5
+          ],
+          "id": 4,
+          "role": "table",
+          "bbox_px": [
+            175,
+            320,
+            1188,
+            640
+          ],
+          "rotation": 90,
+          "table_header": true,
+          "basis": "Agent visual review: all vertical column labels and Ten Canoes header retained together, rotated for transcription."
+        }
+      ]
+    },
+    "315": {
+      "image_sha256": "c93521be49505e36ed7e34a06b0af1e4aa54991a2f90c3ba30ace178ef38ac1b",
+      "layout_sha256": "4f00b55db0f506f9cf6b7d0f9653f09a42eb44070b7adfa49699706e5c93ee45",
+      "basis": "Agent visual inspection of original scanned page: table header, rows and editorial notes distinguished. Not human verification.",
+      "region_roles": {
+        "5": "table",
+        "6": "table",
+        "7": "table",
+        "8": "table",
+        "9": "table",
+        "10": "table",
+        "11": "table",
+        "12": "table",
+        "13": "table",
+        "14": "table",
+        "15": "table",
+        "16": "table",
+        "17": "table",
+        "18": "table",
+        "19": "table",
+        "20": "table",
+        "21": "table"
+      },
+      "region_markers": {
+        "23": "24",
+        "24": "25"
+      },
+      "replace_regions": [
+        {
+          "region_ids": [
+            4
+          ],
+          "id": 4,
+          "role": "table",
+          "bbox_px": [
+            110,
+            545,
+            1127,
+            809
+          ],
+          "rotation": 90,
+          "table_header": true,
+          "basis": "Agent source review: complete multi-column header; do not treat horizontal strips of column labels as text rows."
+        }
+      ],
+      "additional_regions": [
+        {
+          "id": 25,
+          "role": "body",
+          "bbox_px": [
+            247,
+            481,
+            993,
+            515
+          ],
+          "basis": "Agent source review: retain the separate table title above the header."
+        }
+      ]
+    },
+    "316": {
+      "image_sha256": "5694a7dc0b0668e2cc9529e03cf849e984d2eb621794a33b7c0c8cd072ac91a1",
+      "layout_sha256": "dad6d525ce923b01e7ee8fdba0ff2e67750b496261ffca178595a6fc44387b4d",
+      "basis": "Agent visual inspection of original scanned page: table header, rows and editorial notes distinguished. Not human verification.",
+      "region_roles": {
+        "4": "body",
+        "6": "table",
+        "7": "table",
+        "8": "table",
+        "9": "table",
+        "10": "table",
+        "13": "footnote"
+      },
+      "region_markers": {
+        "13": "26"
+      },
+      "split_regions": [
+        {
+          "region_id": 5,
+          "parts": [
+            {
+              "id": 5,
+              "start": 0,
+              "stop": 3,
+              "role": "table",
+              "whole_region": true,
+              "table_header": true,
+              "bbox_px": [
+                220,
+                350,
+                1250,
+                490
+              ]
+            },
+            {
+              "id": 14,
+              "start": 3,
+              "stop": 6,
+              "role": "table"
+            }
+          ]
+        }
+      ]
+    },
+    "456": {
+      "image_sha256": "bf1e7aa3fa4ce752f93d40bf73eefb38c8020077233147f26fd2834051e390fe",
+      "layout_sha256": "775a5a82c1146a4c43c23494efdab9627a1378fb91eff456dc348e881addabbb",
+      "basis": "Agent visual inspection of original scanned page: table header, rows and editorial notes distinguished. Not human verification.",
+      "region_roles": {
+        "5": "table",
+        "6": "table",
+        "7": "table",
+        "8": "table",
+        "9": "table",
+        "10": "table",
+        "11": "table",
+        "12": "table",
+        "13": "table",
+        "14": "table",
+        "15": "table",
+        "16": "table",
+        "17": "table",
+        "18": "table",
+        "19": "table",
+        "20": "table"
+      },
+      "region_markers": {
+        "22": "16"
+      },
+      "replace_regions": [
+        {
+          "region_ids": [
+            4
+          ],
+          "id": 4,
+          "role": "table",
+          "bbox_px": [
+            210,
+            470,
+            1232,
+            724
+          ],
+          "rotation": 90,
+          "table_header": true,
+          "basis": "Agent source review: complete multi-column header; do not treat horizontal strips of column labels as text rows."
+        }
+      ],
+      "additional_regions": [
+        {
+          "id": 23,
+          "role": "body",
+          "bbox_px": [
+            346,
+            402,
+            1102,
+            437
+          ],
+          "basis": "Agent source review: retain the separate table title above the header."
+        }
+      ]
+    },
+    "474": {
+      "image_sha256": "f04ecad8799df154c4da969b273172f3c4e2cac95531e00c21222ce8aed6c726",
+      "layout_sha256": "fa89de83a5826a7318817451c16e24e42b1612393584fec7ce5ff6e8424a971c",
+      "basis": "Agent visual inspection of original scanned page: table header, rows and editorial notes distinguished. Not human verification.",
+      "region_roles": {
+        "5": "table",
+        "6": "table",
+        "7": "table",
+        "8": "table"
+      },
+      "split_regions": [
+        {
+          "region_id": 9,
+          "parts": [
+            {
+              "id": 9,
+              "start": 0,
+              "stop": 9,
+              "role": "table"
+            },
+            {
+              "id": 11,
+              "start": 9,
+              "stop": 24,
+              "role": "footnote"
+            }
+          ]
+        }
+      ],
+      "replace_regions": [
+        {
+          "region_ids": [
+            4
+          ],
+          "id": 4,
+          "role": "table",
+          "bbox_px": [
+            190,
+            520,
+            1230,
+            652
+          ],
+          "rotation": 0,
+          "table_header": true,
+          "basis": "Agent source review: complete multi-column header; do not treat horizontal strips of column labels as text rows."
+        }
+      ],
+      "additional_regions": [
+        {
+          "id": 10,
+          "role": "body",
+          "bbox_px": [
+            307,
+            447,
+            1102,
+            482
+          ],
+          "basis": "Agent source review: retain the separate table title above the header."
+        }
+      ]
+    }
+  }
+}

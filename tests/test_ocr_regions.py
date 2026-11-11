@@ -786,3 +786,202 @@ def test_repeated_fragment_abort_splits_only_until_smaller_reads_succeed(tmp_pat
     assert len(evidence)==2
     assert (run/'repeat.retry_line_01.span_01.split.json').is_file()
     assert (run/'repeat.retry_line_01.span_01.attempt_02.error.json').is_file()
+
+
+def test_genuine_opening_bracket_can_be_adjudicated_without_ignoring_unreviewed_additions():
+    line={'words':[{'text':w,'confidence':96} for w in 'fone of the Red Lake Ojibways].'.split()]}
+    assert regions.coverage_diagnostics('[one of the Red Lake Ojibways].',[line])['suspect']
+    assert not regions.coverage_diagnostics('[one of the Red Lake Ojibways].',[line],{'fone':'[one'})['suspect']
+    assert regions.coverage_diagnostics('[migratorius]',[{'words':[{'text':'migratorius]','confidence':96}]}])['suspect']
+
+
+@pytest.mark.parametrize('bad_hash',[False,True])
+def test_source_reviews_are_bound_to_original_image_and_layout(crop_run,bad_hash):
+    import copy
+    r=crop_run;layout=r.layouts[0];before=copy.deepcopy(layout)
+    path=r.root/'page_0040.layout.json'
+    review={'image_sha256': 'wrong' if bad_hash else layout['image_sha256'],
+            'layout_sha256':regions.sha256(path),'basis':'Agent visual review of table row',
+            'region_roles':{'5':'table'}}
+    data={'pages':{'40':review},'sha256':'reviews-file-hash'}
+    if bad_hash:
+        with pytest.raises(ValueError,match='hash mismatch'):
+            regions.apply_source_reviews(layout,path,data)
+    else:
+        result=regions.apply_source_reviews(layout,path,data)
+        assert result['regions'][-1]['role']=='table'
+        assert result['regions'][-1]['marker_candidate'] is None
+        assert result['source_review']==review
+    assert layout==before
+
+
+def test_reviewed_dagger_is_retained_with_explicit_annotation_evidence(tmp_path):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,40),False)
+    pix.clear_with(255);pix.set_dpi(72,72);pix.save(tmp_path/'full.png')
+    run=tmp_path/'run';run.mkdir();box=[10,10,20,30]
+    layout={'full_image':'full.png','width_px':100,'height_px':40,'dpi':72,
+        'image_sha256':'image-hash','reviews_sha256':'reviews-hash','reviewed_words':[
+            {'draft_text':'t+','bbox_px':box,'text':'†','basis':'Agent visual inspection of retained source crop'}]}
+    selected=[{'bbox':box,'words':[{'text':'t+','confidence':60,'bbox':box}]}]
+    client=Mock()
+    text,evidence,uncertainties=regions.retry_word_fragments(client,'m',{},tmp_path,233,layout,selected,run,'dagger')
+    assert text=='†' and uncertainties
+    assert evidence[0]['reviewed_transcription']=='†'
+    assert evidence[0]['reviews_sha256']=='reviews-hash'
+    assert 'visual_consensus' not in evidence[0]  # Not misrepresented as a model read.
+    client.chat.assert_not_called()
+
+
+def test_source_review_split_must_cover_every_original_line(crop_run):
+    import copy
+    r=crop_run;layout=copy.deepcopy(r.layouts[0]);layout['regions'][2]['lines']=[
+        {'bbox':[1,10,20,20],'text':'continuation'}, {'bbox':[1,25,20,35],'text':'2 note'}]
+    path=r.root/'page_0040.layout.json';dump(path,layout)
+    review={'image_sha256':layout['image_sha256'],'layout_sha256':regions.sha256(path),'basis':'Visual note boundaries',
+        'split_regions':[{'region_id':3,'parts':[{'id':3,'start':0,'stop':1}]}]}
+    with pytest.raises(ValueError,match='retain every line'):
+        regions.apply_source_reviews(layout,path,{'pages':{'40':review},'sha256':'review-hash'})
+
+
+def test_reviewed_table_crop_excludes_ink_from_previous_row(tmp_path):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,100,100),False)
+    pix.clear_with(255);pix.set_dpi(72,72)
+    pix.set_rect(pymupdf.IRect(10,30,90,38),(255,0,0))
+    pix.set_rect(pymupdf.IRect(10,42,90,50),(0,0,255))
+    pix.save(tmp_path/'full.png');run=tmp_path/'run';run.mkdir()
+    above={'bbox':[10,28,90,45],'words':[{'text':'Previous','confidence':96,'bbox':[10,30,90,38]}]}
+    current={'bbox':[10,35,90,55],'words':[{'text':'Sugar','confidence':96,'bbox':[10,42,90,50]}]}
+    region={'id':2,'role':'table','source_original_role':'footnote','source_review_basis':'Visual review',
+            'bbox_px':[10,35,90,55],'crop':'full.png','lines':[current]}
+    layout={'full_image':'full.png','width_px':100,'height_px':100,'dpi':72,
+            'regions':[{'id':1,'role':'table','lines':[above]},region]}
+    crop,_,_=regions.region_chunks(tmp_path,255,layout,region,run,1)[0]
+    result=pymupdf.Pixmap(str(crop));rgb=list(zip(result.samples[0::3],result.samples[1::3],result.samples[2::3]))
+    assert not any(r>200 and g<30 and b<30 for r,g,b in rgb)
+    assert any(b>200 and r<30 and g<30 for r,g,b in rgb)
+
+
+def test_reviewed_table_role_routes_to_body_and_records_review_snapshot(crop_run):
+    r=crop_run;path=r.root/'page_0040.layout.json'
+    review={'version':1,'pages':{'40':{'image_sha256':r.layouts[0]['image_sha256'],
+        'layout_sha256':regions.sha256(path),'basis':'Visual table-row inspection','region_roles':{'5':'table'}}}}
+    reviews=r.root/'reviews.json';dump(reviews,review)
+    ocr_parse.main(r.args+['--reviews',str(reviews)])
+    page=json.loads((r.output/'page_0040.json').read_text())
+    assert page['footnotes']==[]
+    assert 'A continued note.' in page['body']  # Mock visual text routed by corrected role.
+    assert page['source_reviews_sha256']==regions.sha256(reviews)
+    run=next((r.output/'runs').iterdir())
+    assert json.loads((run/'source_reviews.json').read_text())==review
+    assert page['regions'][-1]['role']=='table'
+
+
+def test_dot_dominated_table_row_uses_full_glyph_height_for_filtering():
+    line={'letter_height':7,'words':[
+        {'text':'7','bbox':[0,0,10,15],'confidence':96},
+        {'text':'“grease','bbox':[20,0,80,7],'confidence':53},
+        {'text':'3','bbox':[100,10,104,14],'confidence':57},
+        {'text':'00','bbox':[120,10,136,15],'confidence':49},
+        {'text':'7','bbox':[150,0,160,15],'confidence':96}]}
+    assert [w['text'] for w in regions.diagnostic_words([line])]==['7','“grease','7']
+    assert not regions.coverage_diagnostics('7 “ grease . . . 7',[line])['suspect']
+
+
+def test_extraneous_neighboring_row_text_triggers_retry():
+    line={'words':[{'text':w,'confidence':96} for w in '95 Bags of Pemmican'.split()]}
+    check=regions.coverage_diagnostics('95 Bags of Pemmican 10 Kegs of Sugar',[line])
+    assert check['suspect'] and check['excess_transcribed_tokens']
+    assert not regions.coverage_diagnostics('95 Bags of Pemmican',[line])['suspect']
+
+
+def test_reviewed_marker_preserves_source_number_instead_of_model_misreading(tmp_path):
+    region={'reviewed_marker':'24'}
+    text,marker,removed,evidence=regions.separate_confirmed_marker(
+        Mock(),'m',{},tmp_path,255,{},region,tmp_path,'^4 Of the persons named','4')
+    assert marker=='24' and text==' Of the persons named' and removed=='^4'
+    assert evidence['transcribed_prefix']=='4' and evidence['resolved_marker']=='24'
+    assert evidence['basis']=='Hash-checked source review'
+
+
+def test_numeric_table_columns_and_fractions_are_not_extraneous_prose():
+    draft='Upper English river 4,581|14|1014 148 C.&D.'
+    line={'words':[{'text':w,'confidence':60} for w in draft.split()]}
+    result=regions.coverage_diagnostics('Upper English river 4,581 14 10¼ 148 C. & D.',[line])
+    assert not result['excess_transcribed_tokens']
+
+
+def test_reviewed_rotated_header_is_sent_whole_without_fake_line_anchors(tmp_path):
+    import pymupdf
+    pix=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,200,100),False)
+    pix.clear_with(255);pix.set_dpi(72,72);pix.save(tmp_path/'full.png')
+    run=tmp_path/'run';run.mkdir()
+    layout={'full_image':'full.png','width_px':200,'height_px':100,'dpi':72}
+    region={'id':4,'role':'table','bbox_px':[0,0,180,60],'rotation':90,'whole_region':True,'lines':[]}
+    crop,first,count=regions.region_chunks(tmp_path,293,layout,region,run,1)[0]
+    result=pymupdf.Pixmap(str(crop))
+    assert result.width==60 and result.height==180 and first==count==0
+
+
+def test_fused_ocr_words_and_roman_style_numbers_are_not_inserted_prose():
+    prose=[{'words':[{'text':w,'confidence':60} for w in "May31st. Atten o'clockIembarked in my own canoe".split()]}]
+    assert not regions.coverage_diagnostics("May 31st. At ten o'clock I embarked in my own canoe",prose)['excess_transcribed_tokens']
+    row=[{'words':[{'text':w,'confidence':60} for w in 'Batchewoinan bay 2581 2 11 V'.split()]}]
+    assert not regions.coverage_diagnostics('Batchewoinan bay 258 I 2 II V.',row)['excess_transcribed_tokens']
+
+
+def test_overwrite_updates_recovery_index_to_new_retained_source(crop_run):
+    r=crop_run;r.output.mkdir()
+    dump(r.output/'recovery_manifest.json',{'scope':[40,41],'pages':[]})
+    ocr_parse.main(r.args)
+    r.client.chat.side_effect=r.replies()+r.replies()
+    ocr_parse.main(r.args+['--overwrite'])
+    index=json.loads((r.output/'recovery_manifest.json').read_text())
+    page=json.loads((r.output/'page_0040.json').read_text())
+    assert index['active_recovery_run']==page['run_id']
+    assert index['recovery_run_status']=='complete_unverified'
+    assert index['present_pages']==2
+    for entry in index['pages']:
+        assert entry['run_id']==page['run_id']
+        for item in entry['files']:
+            assert regions.sha256(Path(item['source_path']))==item['sha256']
+            assert regions.sha256(Path(item['destination_path']))==item['sha256']
+
+
+def test_low_confidence_draft_words_are_not_hallucinated_extra_prose():
+    text='Cut Bank cr. traverses this loop southeastwardly, to fall into Mouse r. near Wood'
+    words=[{'text':word,'confidence':20 if index<2 else 96} for index,word in enumerate(text.split())]
+    assert not regions.coverage_diagnostics(text,[{'words':words}])['suspect']
+    assert regions.coverage_diagnostics(text+' inserted foreign words',[{'words':words}])['suspect']
+
+
+def test_visually_adjudicated_words_are_not_rejected_again_as_insertions():
+    lines=[{'words':[{'text':'GAVGo9','confidence':96}]}]
+    assert regions.coverage_diagnostics('Keg salt',lines)['suspect']
+    assert not regions.coverage_diagnostics('Keg salt',lines,{'GAVGo9':'Keg salt'})['suspect']
+
+
+def test_table_consensus_ignores_leaders_but_preserves_number_separation_and_brackets():
+    assert regions.full_line_key('Pemmican.....12 | 35..188',True)==regions.full_line_key('Pemmican..12...35....188.',True)
+    assert regions.full_line_key('3 5 0',True)!=regions.full_line_key('35 0',True)
+    assert regions.full_line_key('Pemmican [12] 35',True)!=regions.full_line_key('Pemmican 12 35',True)
+    assert regions.full_line_key('Text...',False)!=regions.full_line_key('Text.',False)
+
+
+def test_small_ocr_boxes_still_explain_words_for_insertion_diagnostics():
+    words=[{'text':'Macdonel','confidence':96,'bbox':[0,0,80,20]},
+           {'text':'[szc]','confidence':96,'bbox':[85,0,120,20]},
+           {'text':'men','confidence':96,'bbox':[125,15,155,20]},
+           {'text':'was','confidence':96,'bbox':[160,15,180,20]}]
+    result=regions.coverage_diagnostics('Macdonel [sic] men was',[{'letter_height':20,'words':words}])
+    assert not result['excess_transcribed_tokens']
+    assert result['suspect']  # The sic/szc disagreement still requires visual adjudication.
+
+
+def test_assembled_validated_spans_do_not_reapply_untrusted_draft_vocabulary():
+    lines=[{'words':[{'text':w,'confidence':60} for w in '3 USES SE hoc'.split()]}]
+    assert regions.coverage_diagnostics('5 Kegs sugar 2 3',lines)['suspect']
+    assert not regions.coverage_diagnostics('5 Kegs sugar 2 3',lines,check_insertions=False)['suspect']
+    amount=[{'words':[{'text':'618','confidence':96}]}]
+    assert regions.coverage_diagnostics('619',amount,check_insertions=False)['suspect']
